@@ -63,56 +63,31 @@ This stage uses the Bastion host (**bastion.internet.lab.test**), which can run 
 VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distribution for VKS clusters. VMware distributes Kubernetes releases as virtual machine templates, which you synchronize with the platform using a vCenter Content Library. Download the latest Kubernetes release files from https://wp-content.broadcom.com/v2/latest/. The versions to download depend on your workload requirements; we recommend downloading three or more of the latest versions. Follow [Step #3 in the official documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/managing-vsphere-kubernetes-service/administering-kubernetes-releases-for-tkg-service-clusters/create-a-local-content-library-for-air-gapped-cluster-provisioning.html) to download the appropriate Kubernetes release files for each version. The VKR shipped with VCF 9.1.1 is version 1.34.2.
 
 ### 1b. VCF CLI and Plugins
-The VCF CLI and its plugins are first installed on the Bastion host (`bastion.internet.lab.test`); the same tarballs are then transferred to the Admin host and installed there. At the time of writing, VCF CLI 9.1.1 is the supported version for vSphere and Supervisor 9.1.1.
+The VCF CLI and its plugins are required to interact with Supervisor and VKS clusters. Use `vcf-download-tool` to download the VCF Consumption CLI and its plugin bundle into the `depot-store/` directory, alongside the other artifacts downloaded in the following sections. At the time of writing, VCF CLI 9.1.1 is the supported version for vSphere and Supervisor 9.1.1.
 
-In internet-connected VCF deployments, the VCF CLI binary can be downloaded from the vSphere Supervisor home page or from the VCF Automation Tenant Portal. In the internet-restricted environment that this guide covers, follow [Installing the VCF CLI in Internet Restricted Environments](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/building-your-cloud-applications/getting-started-with-the-tools-for-building-applications/installing-and-using-vcf-cli-v9/installing-the-vcf-cli-in-internet-restricted-environments(2).html) to download the VCF Consumption CLI and its plugin bundle. The download steps are summarized below.
+`vcf-download-tool` requires a depot download activation code from the Broadcom Business Services console. Save the activation code to a file (for example, `activation-code.txt`) on the Bastion host before running any download commands.
 
 ```bash
-## Download VCF CLI and VCF CLI Plugins
-1. Open a browser and navigate to https://support.broadcom.com.
-2. Login with your account credentials.
-3. Navigate to `My Downloads` page and search for `VCF consumption CLI`.
-4. Click on `VCF consumption CLI` to navigate to the VCF consumption CLI download page.
-5. Click on `CLI` link, then select release version 9.1.1 to download the desired VCF CLI tar for the target OS to run VCF CLI commands.
-6. Click on `Plugin-Bundles` link, then select release version 9.1.1 to download the desired VCF CLI plugin bundle tar for the target OS to run VCF CLI commands.
+## Download the VCF Consumption CLI
+./bin/vcf-download-tool artifacts download \
+    --vcf-version=9.1.1 \
+    --component=VCF_CONSUMPTION_CLI \
+    --depot-store=./depot-store \
+    --depot-download-activation-code-file=activation-code.txt
 
-## Install VCF CLI on the bastion host (Linux/amd64 example)
-tar -xzvf ./VCF-Consumption-CLI-Linux_AMD64-9.1.1.tar.gz
-sudo install ./vcf-cli-linux_amd64 /usr/local/bin/vcf
-
-## Verify the installation
-vcf version
-
-## Sample output
-version: v9.1.1.0.25296329
-buildDate: 2026-03-20
-sha: 987b58e
-releaseType: ga
-arch: amd64
-
-## Install the desired VCF CLI plugins on the bastion host from the plugin bundle
-mkdir -p ~/vcf-plugin-bundle
-tar -xvzf VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.1.0.25305443.tar.gz -C ~/vcf-plugin-bundle/
-
-## Install a single plugin (example: addon) or all plugins
-vcf plugin install addon  --local-source ~/vcf-plugin-bundle/
-vcf plugin install all --local-source ~/vcf-plugin-bundle/
-
-## Verify the plugins are installed
-vcf plugin list
-
-# Sample output if all plugins are installed
-  NAME                DESCRIPTION                                                                       INSTALLED  STATUS
-  addon               Add-on lifecycle management                                                       v3.6.1     installed
-  cluster             Kubernetes cluster operations                                                     v3.6.1     installed
-  imgpkg              package, distribute, and relocate your configuration and dependent oci images as  v9.1.1     installed
-                      one oci artifact
-... (additional plugin lines truncated for brevity) ...
+## Download the VCF Consumption CLI plugins
+./bin/vcf-download-tool artifacts download \
+    --vcf-version=9.1.1 \
+    --component=VCF_CONSUMPTION_CLI_PLUGINS \
+    --depot-store=./depot-store \
+    --depot-download-activation-code-file=activation-code.txt
 ```
+
+After the VCF CLI and plugins are uploaded to the Software Depot (step 5a), the VCF CLI can be downloaded and installed directly from the vSphere Supervisor landing page on the Admin host (step 5c).
 
 ### 1c. Binaries and YAML files required for Supervisor Services
 
-Use `vcf-download-tool` to download Supervisor Service artifacts from Broadcom. The tool requires a depot download activation code from the Broadcom Business Services console. Save the activation code to a file (for example, `activation-code.txt`) on the Bastion host before running any download commands.
+Use `vcf-download-tool` to download Supervisor Service artifacts from Broadcom, using the same `activation-code.txt` depot download activation code created in step 1b.
 
 ```bash
 ## List available artifacts for VCF 9.1.1
@@ -189,9 +164,7 @@ VKS Standard Packages let administrators and users add and manage standard servi
 ### Summary
 The following files, binaries, and packages have been successfully downloaded in this section and **must be transferred to the Admin host**.
 * Kubernetes Release OVA files.
-* VCF CLI tar (e.g. `VCF-Consumption-CLI-Linux_AMD64-9.1.1.tar.gz`).
-* VCF CLI plugin bundle tar (e.g. `VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.1.tar.gz`).
-* `depot-store/` directory containing all downloaded artifacts (Supervisor Service and VKS Standard Packages OCI bundles).
+* `depot-store/` directory containing all downloaded artifacts (VCF Consumption CLI and plugins, Supervisor Service and VKS Standard Packages OCI bundles).
 * `activation-code.txt` (Broadcom Business Services depot download activation code).
 * Supervisor Service `depot-*` configuration YAML files (downloaded alongside the OCI bundles by `vcf-download-tool`).
 
@@ -212,7 +185,36 @@ The Admin host (**admin.env1.lab.test**) is essential for the remaining deployme
 
 Note: Before moving forward, verify that all the files mentioned in the Summary section in Step 1 have been successfully copied to the Admin host.
 
-### 5a. Download and install kubectl
+### 5a. Upload the VCF CLI and plugins to the Software Depot
+Upload the VCF Consumption CLI and its plugin bundle, downloaded in step 1b, to the Software Depot using `vcf-download-tool`. The tool authenticates via VCF Operations (VCFOps) credentials.
+
+To find the Software Depot FQDN, log in to VCF Operations and navigate to **Build &rarr; Lifecycle &rarr; VCF Management &rarr; Components**; the FQDN is shown for the Fleet Software Depot component.
+
+```bash
+## Upload the VCF Consumption CLI
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=VCF_CONSUMPTION_CLI \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+
+## Upload the VCF Consumption CLI plugins
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=VCF_CONSUMPTION_CLI_PLUGINS \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+```
+
+After the upload completes, the VCF CLI binary and its plugin bundle can be downloaded directly from the vSphere Supervisor landing page and installed on the Admin host (see step 5c).
+
+### 5b. Download and install kubectl
 `kubectl` is the standard command-line tool for interacting with Kubernetes clusters; it is used in this guide to manage Supervisor and VKS clusters together with the VCF CLI. The legacy `kubectl-vsphere` plugin has been deprecated in vSphere 9.1.0 and replaced by the VCF CLI; it is not required for this guide.
 
 You can download and install the `kubectl` binary on the Admin host either from the Supervisor Cluster Kube-API server UI or by running the commands below.
@@ -232,10 +234,28 @@ sudo install kubectl /usr/local/bin/kubectl
 kubectl version
 ```
 
-### 5b. Log in to the Supervisor
-Log in to the Supervisor using the VCF CLI. The VCF CLI and the required plugins were transferred from the Bastion host in step 1b; install them on the Admin host with the same `vcf plugin install ...` commands shown there before continuing.
+### 5c. Log in to the Supervisor
+Log in to the Supervisor using the VCF CLI. Now that the VCF CLI and its plugins have been uploaded to the Software Depot (step 5a), download and install them on the Admin host directly from the vSphere Supervisor landing page.
 
-Before running VCF CLI commands, download and install the vCenter trusted root CA certificates so that VCF CLI can trust the certificate of the Supervisor.
+```bash
+## Download the VCF CLI from the vSphere Supervisor landing page (Linux/amd64 example)
+wget https://<Supervisor-KubeAPI-Endpoint>/vcf-cli/linux-amd64/vcf-cli-linux_amd64 --no-check-certificate
+
+## Sample Command:
+wget https://supervisor0.env1.lab.test/vcf-cli/linux-amd64/vcf-cli-linux_amd64 --no-check-certificate
+
+## Install the VCF CLI
+sudo install ./vcf-cli-linux_amd64 /usr/local/bin/vcf
+
+## Verify the installation
+vcf version
+
+## Install the VCF CLI plugins from the Software Depot, then verify
+vcf plugin install all
+vcf plugin list
+```
+
+Before running VCF CLI commands against the Supervisor, download and install the vCenter trusted root CA certificates so that VCF CLI can trust the certificate of the Supervisor.
 
 ```bash
 # Download vCenter trusted root CA certificates with below command or download via the "Download trusted root CA certificates" link on the vCenter login UI.
@@ -370,7 +390,7 @@ VKS Standard Packages can be deployed from the VKS Standard repository using the
 Log in to the VKS workload cluster using the VCF CLI from the Admin host. (The `kubectl-vsphere` plugin is deprecated in vSphere 9.1.0; use `vcf context` instead.)
 
 ```bash
-## Create a VCF CLI context for the Supervisor (if not already created in 5b)
+## Create a VCF CLI context for the Supervisor (if not already created in 5c)
 vcf context create <context-name> --endpoint <SupervisorAPIEndpoint> --username <sso_username> --type k8s
 
 ## Switch the active context to the target VKS workload cluster
