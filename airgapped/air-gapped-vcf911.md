@@ -1,4 +1,4 @@
-# VKS Deployment Guide for VCF 9.1.0 air-gapped environments
+# VKS Deployment Guide for VCF 9.1.1+ air-gapped environments
 
 ## Introduction
 vSphere Kubernetes Service (VKS) is the Kubernetes service that runs on top of vSphere Supervisor in VCF (VMware Cloud Foundation) and VVF (VMware vSphere Foundation) deployments. This guide describes the end-to-end procedure for deploying VKS clusters, Supervisor Services, and VKS Standard Packages in an air-gapped environment that has no direct internet access.
@@ -26,7 +26,8 @@ The data flow of packages, binaries, and images between the internet-connected a
 * **VKS Standard Packages** &mdash; A curated set of services and add-ons (for example, cert-manager, Contour, Prometheus, Grafana) that administrators and users can install and manage on VKS clusters using the VCF CLI or relevant add-ons APIs.
 
 ## Prerequisites
-* This guide applies to VCF / VVF 9.1.0 deployments. The OCI registry in VCF Software Depot is used as the OCI-compliant registry that hosts the OCI images for Supervisor Services and VKS Standard Packages.
+* This guide applies to VCF / VVF 9.1.1 or later deployments. The VCF Download Tool is used to download non-OCI artifacts and OCI images of Supervisor, Supervisor Services, VKS Standard Packages, VCF CLI and plugins and upload them to Software depot.
+* For VCF / VVF deployments based on release 9.1.0, the OCI registry in VCF Software Depot is used as the OCI-compliant registry that hosts the OCI images for Supervisor Services and VKS Standard Packages; please follow this [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md) instead.
 * For VCF / VVF deployments based on releases earlier than 9.1.0, an external OCI-compliant registry is required; please follow the legacy [VKS Deployment Guide for air-gapped environments](/airgapped/air-gapped.md) instead.
 
 ## Bill of Materials
@@ -36,9 +37,9 @@ The table below provides sample hostnames and versions used throughout the docum
 |---------|-------|----------------------------------|
 |Bastion Host|Windows or Linux|bastion.internet.lab.test|
 |Admin Host (air-gapped)|Ubuntu 24.04.4 (identical to the Bastion Host)|admin.env1.lab.test|
-|vCenter|9.1.0|vcenter.env1.lab.test|
-|ESXi|9.1.0|esxi[0..xxx].env1.lab.test|
-|Supervisor|9.1.0|supervisor0.env1.lab.test|
+|vCenter|9.1.1|vcenter.env1.lab.test|
+|ESXi|9.1.1|esxi[0..xxx].env1.lab.test|
+|Supervisor|9.1.1|supervisor0.env1.lab.test|
 |VKS cluster|1.34.2|workload-vsphere-vks1|
 |VKS Standard Packages|3.6.0-20260211||
 |VKS Service|3.6.1||
@@ -59,10 +60,10 @@ In addition, the following packages and binaries should be installed on both the
 This stage uses the Bastion host (**bastion.internet.lab.test**), which can run Windows or Linux. The following plugins, binaries, and packages must be downloaded; each plays a role in the platform deployment process.
 
 ### 1a. VMware vSphere Kubernetes release OVA files
-VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distribution for VKS clusters. VMware distributes Kubernetes releases as virtual machine templates, which you synchronize with the platform using a vCenter Content Library. Download the latest Kubernetes release files from https://wp-content.broadcom.com/v2/latest/. The versions to download depend on your workload requirements; we recommend downloading three or more of the latest versions. Follow [Step #3 in the official documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/managing-vsphere-kubernetes-service/administering-kubernetes-releases-for-tkg-service-clusters/create-a-local-content-library-for-air-gapped-cluster-provisioning.html) to download the appropriate Kubernetes release files for each version. The VKR shipped with VCF 9.1.0 is version 1.34.2.
+VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distribution for VKS clusters. VMware distributes Kubernetes releases as virtual machine templates, which you synchronize with the platform using a vCenter Content Library. Download the latest Kubernetes release files from https://wp-content.broadcom.com/v2/latest/. The versions to download depend on your workload requirements; we recommend downloading three or more of the latest versions. Follow [Step #3 in the official documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/managing-vsphere-kubernetes-service/administering-kubernetes-releases-for-tkg-service-clusters/create-a-local-content-library-for-air-gapped-cluster-provisioning.html) to download the appropriate Kubernetes release files for each version. The VKR shipped with VCF 9.1.1 is version 1.34.2.
 
 ### 1b. VCF CLI and Plugins
-The VCF CLI and its plugins are first installed on the Bastion host (`bastion.internet.lab.test`); the same tarballs are then transferred to the Admin host and installed there. At the time of writing, VCF CLI 9.1.0 is the supported version for vSphere and Supervisor 9.1.0.
+The VCF CLI and its plugins are first installed on the Bastion host (`bastion.internet.lab.test`); the same tarballs are then transferred to the Admin host and installed there. At the time of writing, VCF CLI 9.1.1 is the supported version for vSphere and Supervisor 9.1.1.
 
 In internet-connected VCF deployments, the VCF CLI binary can be downloaded from the vSphere Supervisor home page or from the VCF Automation Tenant Portal. In the internet-restricted environment that this guide covers, follow [Installing the VCF CLI in Internet Restricted Environments](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/building-your-cloud-applications/getting-started-with-the-tools-for-building-applications/installing-and-using-vcf-cli-v9/installing-the-vcf-cli-in-internet-restricted-environments(2).html) to download the VCF Consumption CLI and its plugin bundle. The download steps are summarized below.
 
@@ -72,18 +73,18 @@ In internet-connected VCF deployments, the VCF CLI binary can be downloaded from
 2. Login with your account credentials.
 3. Navigate to `My Downloads` page and search for `VCF consumption CLI`.
 4. Click on `VCF consumption CLI` to navigate to the VCF consumption CLI download page.
-5. Click on `CLI` link, then select release version 9.1.0 to download the desired VCF CLI tar for the target OS to run VCF CLI commands.
-6. Click on `Plugin-Bundles` link, then select release version 9.1.0 to download the desired VCF CLI plugin bundle tar for the target OS to run VCF CLI commands.
+5. Click on `CLI` link, then select release version 9.1.1 to download the desired VCF CLI tar for the target OS to run VCF CLI commands.
+6. Click on `Plugin-Bundles` link, then select release version 9.1.1 to download the desired VCF CLI plugin bundle tar for the target OS to run VCF CLI commands.
 
 ## Install VCF CLI on the bastion host (Linux/amd64 example)
-tar -xzvf ./VCF-Consumption-CLI-Linux_AMD64-9.1.0.tar.gz
+tar -xzvf ./VCF-Consumption-CLI-Linux_AMD64-9.1.1.tar.gz
 sudo install ./vcf-cli-linux_amd64 /usr/local/bin/vcf
 
 ## Verify the installation
 vcf version
 
 ## Sample output
-version: v9.1.0.0.25296329
+version: v9.1.1.0.25296329
 buildDate: 2026-03-20
 sha: 987b58e
 releaseType: ga
@@ -91,7 +92,7 @@ arch: amd64
 
 ## Install the desired VCF CLI plugins on the bastion host from the plugin bundle
 mkdir -p ~/vcf-plugin-bundle
-tar -xvzf VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.0.0.25305443.tar.gz -C ~/vcf-plugin-bundle/
+tar -xvzf VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.1.0.25305443.tar.gz -C ~/vcf-plugin-bundle/
 
 ## Install a single plugin (example: addon) or all plugins
 vcf plugin install addon  --local-source ~/vcf-plugin-bundle/
@@ -104,7 +105,7 @@ vcf plugin list
   NAME                DESCRIPTION                                                                       INSTALLED  STATUS
   addon               Add-on lifecycle management                                                       v3.6.1     installed
   cluster             Kubernetes cluster operations                                                     v3.6.1     installed
-  imgpkg              package, distribute, and relocate your configuration and dependent oci images as  v9.1.0     installed
+  imgpkg              package, distribute, and relocate your configuration and dependent oci images as  v9.1.1     installed
                       one oci artifact
 ... (additional plugin lines truncated for brevity) ...
 ```
@@ -114,21 +115,21 @@ vcf plugin list
 Use `vcf-download-tool` to download Supervisor Service artifacts from Broadcom. The tool requires a depot download activation code from the Broadcom Business Services console. Save the activation code to a file (for example, `activation-code.txt`) on the Bastion host before running any download commands.
 
 ```bash
-## List available artifacts for VCF 9.1.0
+## List available artifacts for VCF 9.1.1
 ./bin/vcf-download-tool artifacts list \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --depot-download-activation-code-file=activation-code.txt
 
-## Download all Supervisor Service artifacts for VCF 9.1.0
+## Download all Supervisor Service artifacts for VCF 9.1.1
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --category=SUPERVISOR_SERVICE \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
 
 ## Or download a single Supervisor Service by component name (example: ArgoCD)
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_ARGOCD \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
@@ -157,7 +158,7 @@ The table below provides the sample list of Supervisor Services that can be down
 |VKS Service|Core|3.6.3|
 |ArgoCD|Standard|1.1.0|
 |CA Cluster Issuer|Standard|0.0.2|
-|Consumption Interface|Standard|9.1.0|
+|Consumption Interface|Standard|9.1.1|
 |Contour|Standard|1.33.1|
 |ExternalDNS|Standard|0.18.0|
 |Harbor|Standard|2.14.2|
@@ -168,7 +169,7 @@ If your air-gapped environment does not have VCF Automation installed, you must 
 
 ```bash
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_HARBOR \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
@@ -179,7 +180,7 @@ VKS Standard Packages let administrators and users add and manage standard servi
 
 ```bash
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=VKS_STANDARD_PACKAGES \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
@@ -188,8 +189,8 @@ VKS Standard Packages let administrators and users add and manage standard servi
 ### Summary
 The following files, binaries, and packages have been successfully downloaded in this section and **must be transferred to the Admin host**.
 * Kubernetes Release OVA files.
-* VCF CLI tar (e.g. `VCF-Consumption-CLI-Linux_AMD64-9.1.0.tar.gz`).
-* VCF CLI plugin bundle tar (e.g. `VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.0.tar.gz`).
+* VCF CLI tar (e.g. `VCF-Consumption-CLI-Linux_AMD64-9.1.1.tar.gz`).
+* VCF CLI plugin bundle tar (e.g. `VCF-Consumption-CLI-PluginBundle-Linux_AMD64-9.1.1.tar.gz`).
 * `depot-store/` directory containing all downloaded artifacts (Supervisor Service and VKS Standard Packages OCI bundles).
 * `activation-code.txt` (Broadcom Business Services depot download activation code).
 * Supervisor Service `depot-*` configuration YAML files (downloaded alongside the OCI bundles by `vcf-download-tool`).
@@ -264,7 +265,7 @@ To find the Software Depot FQDN, log in to VCF Operations and navigate to **Buil
 ```bash
 ## Upload all Supervisor Service artifacts from depot-store
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --category=SUPERVISOR_SERVICE \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -274,7 +275,7 @@ To find the Software Depot FQDN, log in to VCF Operations and navigate to **Buil
 
 ## Or upload a single Supervisor Service component (example: ArgoCD)
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_ARGOCD \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -284,7 +285,7 @@ To find the Software Depot FQDN, log in to VCF Operations and navigate to **Buil
 
 ## Verify the uploaded artifacts on the Software Depot
 ./bin/vcf-download-tool depot artifacts list \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --depot-fqdn=<FDS_FQDN> \
     --ops-fqdn=<OPS_FQDN> \
     --ops-user=admin \
@@ -296,7 +297,7 @@ Use `vcf-download-tool` to upload the VKS Standard Packages bundle to the OCI re
 
 ```bash
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=VKS_STANDARD_PACKAGES \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -309,7 +310,7 @@ If your air-gapped environment does not have VCF Automation installed, also uplo
 
 ```bash
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_HARBOR \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -486,21 +487,21 @@ On the internet-connected Bastion host, use `vcf-download-tool` to download the 
 ```bash
 ## Download the VKS Service Supervisor Service (example component)
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_VKS \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
 
 ## Download all Supervisor Services at once
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --category=SUPERVISOR_SERVICE \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
 
 ## Download VKS Standard Packages
 ./bin/vcf-download-tool artifacts download \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=VKS_STANDARD_PACKAGES \
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
@@ -523,7 +524,7 @@ On the Admin host, use `vcf-download-tool` to upload the downloaded OCI image co
 ```bash
 ## Upload the VKS Service Supervisor Service
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=SUPERVISOR_SERVICE_VKS \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -533,7 +534,7 @@ On the Admin host, use `vcf-download-tool` to upload the downloaded OCI image co
 
 ## Upload all Supervisor Services at once
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --category=SUPERVISOR_SERVICE \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -543,7 +544,7 @@ On the Admin host, use `vcf-download-tool` to upload the downloaded OCI image co
 
 ## Upload VKS Standard Packages
 ./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --component=VKS_STANDARD_PACKAGES \
     --depot-store=./depot-store \
     --depot-fqdn=<FDS_FQDN> \
@@ -553,7 +554,7 @@ On the Admin host, use `vcf-download-tool` to upload the downloaded OCI image co
 
 ## Verify the uploaded artifacts on the Software Depot
 ./bin/vcf-download-tool depot artifacts list \
-    --vcf-version=9.1.0 \
+    --vcf-version=9.1.1 \
     --depot-fqdn=<FDS_FQDN> \
     --ops-fqdn=<OPS_FQDN> \
     --ops-user=admin \
