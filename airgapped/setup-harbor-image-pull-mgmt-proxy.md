@@ -19,16 +19,15 @@ Symptoms include:
 
 ## Environment
 
-- VMware vSphere Kubernetes Service (VKS) 9.1.0
-- VMware vSphere Foundation (VVF) 9.1.0
-- VMware Cloud Foundation (VCF) 9.1.0 without VCF Automation
+- VMware vSphere Foundation (VVF) 9.1.1
+- VMware Cloud Foundation (VCF) 9.1.1 without VCF Automation
 - Air-gapped or internet-restricted deployments using the VCF Software Depot OCI registry
 
 ---
 
 ## Cause
 
-The VCF Software Depot OCI registry (`depot.kube-system.svc`) is reachable from the Supervisor control plane VMs only when a management proxy service is present. Without this proxy, the Supervisor cannot resolve or reach the Software Depot hostname to pull Harbor Supervisor Service images, because:
+The VCF Software Depot OCI registry is reachable from the Supervisor control plane VMs only when a management proxy service is present. Without this proxy, the Supervisor cannot resolve or reach the Software Depot hostname to pull Harbor Supervisor Service images, because:
 
 - Software Depot lives on the management network, separate from the Supervisor workload network.
 - The default CoreDNS configuration on the Supervisor control plane VMs does not include a route to the Software Depot hostname.
@@ -44,8 +43,8 @@ A Kubernetes `Service` of type `ExternalName` (named `depot-image-proxy`) must b
 ### Prerequisites
 
 - The Admin host has `ssh`, `sshpass`, and `openssl` installed.
-- The Software Depot endpoint is already configured on the vCenter (visible under **Build → Lifecycle → VCF Management → Components → Fleet Software Depot**).
-- The Harbor Supervisor Service OCI image has been uploaded to the Software Depot OCI registry (see [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](air-gapped-vcf911.md), step 6b).
+- The Software Depot endpoint is already configured on the vCenter and the Supervisor (visible under **Supervisor → Configure → Supervisor → Network → Management Porxy Configuration → `vcf-depot` management service**).
+- The Harbor Supervisor Service OCI image has been uploaded to the Software Depot OCI registry (see [VKS Deployment Guide for VCF 9.1.1 air-gapped environments](air-gapped-vcf911.md), step 2d).
 - You have the vCenter FQDN, vCenter root SSH password, vCenter admin credentials, and the Supervisor ID.
 
 ### Step 1: Download the `manage-depot-image-proxy.sh` script
@@ -82,8 +81,8 @@ Expected output (abbreviated):
 
 ```
 VMware vCenter Server
-Release: 9.1.0.0
-Version: 9.1.0.0
+Release: 9.1.1.0
+Version: 9.1.1.0
 
 Supervisor topology clusters: domain-c52
 Matched cluster_id=domain-c52 floating_ip=10.161.112.94
@@ -164,7 +163,7 @@ The script accepts the following positional arguments:
 
 ## Additional Information
 
-- [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](air-gapped-vcf911.md) — end-to-end air-gapped deployment procedure, including downloading and uploading Harbor images to Software Depot.
+- [VKS Deployment Guide for VCF 9.1.1 air-gapped environments](air-gapped-vcf911.md) — end-to-end air-gapped deployment procedure, including downloading and uploading Harbor images to Software Depot.
 - [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) — official documentation for manually installing the Harbor Supervisor Service.
 - [Using Harbor as a VCF service](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/using-harbor-as-a-vcf-service.html) — overview of Harbor as a VCF service, applicable to VCF deployments with VCF Automation.
 
