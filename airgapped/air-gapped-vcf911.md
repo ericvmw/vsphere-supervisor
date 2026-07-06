@@ -322,98 +322,13 @@ If your air-gapped environment does not have VCF Automation installed, also uplo
 
 In a VCF deployment that includes VCF Automation, follow [Using Harbor as a VCF service documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/using-harbor-as-a-vcf-service.html) to install and configure Harbor as a VCF service on a Supervisor in a VCF region. Once Harbor VCF service is up and the corresponding Supervisor Service images and VKS Standard Packages images are uploaded to the OCI registry on Software Depot, Supervisor Services and VKS Standard Packages can be installed using the same workflows as in an internet-connected environment.
 
-If your VCF deployment does not include VCF Automation, or you are running a VVF deployment, perform step 7a and 7b first, then follow [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) to install the Harbor Supervisor Service manually.
+If your VCF deployment does not include VCF Automation, or you are running a VVF deployment, perform step 7a first, then follow [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) to install the Harbor Supervisor Service manually.
 
 ### 7a. Configure a management proxy on the Supervisor to pull Harbor images from Software Depot
 
-Software Depot lives on the management network, so a management proxy is required to pull Harbor Supervisor Service images from it. The [`manage-depot-image-proxy.sh`](scripts/manage-depot-image-proxy.sh) script can add and remove this management proxy on a Supervisor in a vCenter. It requires that the Software Depot endpoint is already configured on the vCenter and that you have the vCenter and Supervisor identifiers along with the necessary credentials.
-```bash
-./manage-depot-image-proxy.sh -h
+Software Depot lives on the management network, so a management proxy is required to pull Harbor Supervisor Service images from it. Follow the steps in KB article [Configure a Management Proxy on Supervisor to Pull Harbor Images from Software Depot in Air-Gapped Environments](setup-harbor-image-pull-mgmt-proxy.md) to deploy the proxy and update the Harbor package YAML image reference. The KB article includes the `manage-depot-image-proxy.sh` script as a downloadable attachment.
 
-## Sample Output
-Usage:
-  manage-depot-image-proxy.sh add    VC_HOST VC_ROOT_SSH_PASSWORD VC_ADMIN_USER VC_ADMIN_PASSWORD SUPERVISOR_ID
-  manage-depot-image-proxy.sh remove VC_HOST VC_ROOT_SSH_PASSWORD VC_ADMIN_USER VC_ADMIN_PASSWORD SUPERVISOR_ID
-
-  VC_HOST                 vCenter host domain (must match server cert; SSH as root; also REST https host)
-  VC_ROOT_SSH_PASSWORD    root password for sshpass to vCenter
-  VC_ADMIN_USER           vCenter API user (e.g. administrator@vsphere.local)
-  VC_ADMIN_PASSWORD       vCenter API password
-  SUPERVISOR_ID           Supervisor ID for container-image-registries
-
-Requires: ssh, sshpass on your workstation (vCenter hop). On vCenter: sshpass must also be
-installed for Control Plane VM hops (password from decryptK8Pwd.py PWD: line). Passwords may be visible
-in process listings; quote arguments that contain shell metacharacters.
-
-VC_ROOT_SSH_PASSWORD is only for workstation -> vCenter (root). Supervisor Control Plane VM root SSH from
-vCenter uses the PWD value from /usr/lib/vmware-wcp/decryptK8Pwd.py for the matched cluster.
-
-Options:
-  -h, --help    Show this message
-
-## Command to add a management proxy to a Supervisor
-./manage-depot-image-proxy.sh add <VC_HOST> <VC_ROOT_SSH_PASSWORD> <VC_ADMIN_USER> <VC_ADMIN_PASSWORD> <SUPERVISOR_ID>
-
-## Sample command and output
-./manage-depot-image-proxy.sh add lvn-dvm-10-162-200-127.dvm.lvn.broadcom.net 'OOKMwN_Kp_r8wlg8' administrator@vsphere.local 'OOKMwN_Kp_r8wlg8' 284256be-074e-4750-8c9b-f57dfea4fb0a
-Warning: Permanently added '10.161.117.40' (ED25519) to the list of known hosts.
-
-VMware vCenter Server
-Release: 9.1.0.0
-Version: 9.1.0.0
-Build: 25370922
-Type: vCenter Server with an embedded Platform Services Controller
-
-Supervisor topology clusters: domain-c52
-Matched cluster_id=domain-c52 floating_ip=10.161.112.94
-Control Plane VM management IPs (3): 10.161.119.189 10.161.115.81 10.161.117.145
-Generated CA and server cert in /tmp/depot-image-proxy.mA5QH9
-Configuring control plane VM 10.161.119.189 ...
-Warning: Permanently added '10.161.119.189' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-Warning: Permanently added '10.161.119.189' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-service/depot-image-proxy created
-deployment.apps/coredns restarted
-Done control plane VM 10.161.119.189
-Configuring control plane VM 10.161.115.81 ...
-Warning: Permanently added '10.161.115.81' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-Warning: Permanently added '10.161.115.81' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-service/depot-image-proxy unchanged
-deployment.apps/coredns restarted
-Done control plane VM 10.161.115.81
-Configuring control plane VM 10.161.117.145 ...
-Warning: Permanently added '10.161.117.145' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-Warning: Permanently added '10.161.117.145' (ECDSA) to the list of known hosts.
-Welcome to Supervisor on vSphere Zones!
-service/depot-image-proxy unchanged
-deployment.apps/coredns restarted
-Done control plane VM 10.161.117.145
-Registered depot-registry with supervisor 284256be-074e-4750-8c9b-f57dfea4fb0a (HTTP 201)
-All steps finished (add).
-```
-
-### 7b. Update the image reference in the Harbor Supervisor Service package YAML
-The Harbor package YAML downloaded in step 1c (`harbor-svs-v2.14.2+vmware.2-vks.1-25220498.yml`) must have its `image` reference updated so the images are pulled through the management proxy from Software Depot. The original reference looks like this:
-
-```yaml
-      fetch:
-        - imgpkgBundle:
-            image: "depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor/ga/2.14.2/harbor:v2.14.2_vmware.2-vks.1"
-```
-
-Replace it with the management-proxy URL:
-
-```yaml
-      fetch:
-        - imgpkgBundle:
-            image: "depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor/ga/2.14.2/harbor:v2.14.2_vmware.2-vks.1"
-```
-
-After updating the YAML, register the Harbor package YAML on the vCenter, then follow the [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) document to install the Harbor Supervisor Service on the Supervisor and configure Software Depot as the upstream registry for Supervisor Services and other component images.
+After completing the steps in that KB article, continue with registering and installing Harbor using the [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) procedure.
 
 ## 8. Deploy VKS Cluster(s)
 
