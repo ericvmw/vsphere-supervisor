@@ -61,9 +61,9 @@ The script requires the Supervisor ID. Retrieve it from the vCenter REST API or 
 
 ```bash
 ## Query the vCenter REST API for the list of Supervisors (requires vCenter admin credentials)
-curl -sk -u 'administrator@vsphere.local:<password>' \
-    https://vcenter.env1.lab.test/api/vcenter/namespace-management/supervisors \
-    | jq -r '.[].supervisor'
+SESSION_ID=$(curl -k -s -u "administrator@vsphere.local:<password>" -X POST "https://vcenter.env1.lab.test/api/session" | tr -d '"')
+curl -k -s -X GET -H "vmware-api-session-id: $SESSION_ID" \
+    https://vcenter.env1.lab.test/api/vcenter/namespace-management/supervisors/summaries" | jq -r '.items.[].supervisor'
 ```
 
 ### Step 3: Add the management proxy to the Supervisor
@@ -106,14 +106,14 @@ All steps finished (add).
 
 ### Step 4: Update the Harbor package YAML image reference
 
-The Harbor Supervisor Service package YAML (`harbor-svs-v2.14.2+vmware.2-vks.1-25220498.yml`, downloaded in [step 1c of the air-gapped guide](air-gapped-vcf911.md)) contains an image reference that must be updated to route through the management proxy.
+The Harbor Supervisor Service package YAML (`harbor-svs-v2.15.2-vmware.1-vks.1-25601986.yml`, downloaded in [step 1c of the air-gapped guide](air-gapped-vcf911.md)) contains an image reference that must be updated to route through the management proxy.
 
 Locate the `imgpkgBundle.image` field in the YAML. The original value points directly to the Software Depot internal service:
 
 ```yaml
       fetch:
         - imgpkgBundle:
-            image: "depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor/ga/2.14.2/harbor:v2.14.2_vmware.2-vks.1"
+            image: "depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor/ga/2.15.2/harbor:v2.15.2_vmware.2-vks.1"
 ```
 
 Replace it with the management-proxy hostname:
@@ -121,14 +121,14 @@ Replace it with the management-proxy hostname:
 ```yaml
       fetch:
         - imgpkgBundle:
-            image: "depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor/ga/2.14.2/harbor:v2.14.2_vmware.2-vks.1"
+            image: "depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor/ga/2.15.2/harbor:v2.15.2_vmware.2-vks.1"
 ```
 
 You can use `sed` to apply this substitution in place:
 
 ```bash
 sed -i 's|depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor|depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor|g' \
-    harbor-svs-v2.14.2+vmware.2-vks.1-25220498.yml
+    harbor-svs-v2.15.2-vmware.1-vks.1-25601986.yml
 ```
 
 ### Step 5: Register and install the Harbor Supervisor Service
