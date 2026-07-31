@@ -40,8 +40,8 @@ The table below provides sample hostnames and versions used throughout the docum
 |ESXi|9.1.1|esxi[0..xxx].env1.lab.test|
 |Supervisor|9.1.1|supervisor0.env1.lab.test|
 |VKS cluster|1.34.2|workload-vsphere-vks1|
-|VKS Standard Packages|3.6.0-20260211||
-|VKS Service|3.6.1||
+|VKS Standard Packages|3.7.0-20260618||
+|VKS Service|3.7.0||
 
 In addition, the following packages and binaries should be installed on both the Bastion host and the Admin host:
 
@@ -68,8 +68,6 @@ VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distri
     --depot-store=./depot-store \
     --depot-download-activation-code-file=activation-code.txt
 ```
-
-The VKR shipped with VCF 9.1.1 is version 1.34.2.
 
 ### 1b. VCF CLI and Plugins
 The VCF CLI and its plugins are required to interact with Supervisor and VKS clusters. Use `vcf-download-tool` to download the VCF Consumption CLI and its plugin bundle into the `depot-store/` directory, alongside the other artifacts downloaded in the following sections. At the time of writing, VCF CLI 9.1.1 is the supported version for vSphere and Supervisor 9.1.1.
@@ -139,15 +137,18 @@ The table below provides the sample list of Supervisor Services that can be down
 
 |Service Name|Type|Version|
 |------------|----|-------|
-|VKS Service|Core|3.6.3|
-|ArgoCD|Standard|1.1.0|
-|CA Cluster Issuer|Standard|0.0.2|
+|VKS Service|Core|3.7.0|
+|ArgoCD|Standard|1.2.0|
+|CA Cluster Issuer|Standard|9.1.1|
 |Consumption Interface|Standard|9.1.1|
-|Contour|Standard|1.33.1|
-|ExternalDNS|Standard|0.18.0|
-|Harbor|Standard|2.14.2|
-|Metrics Aggregator|Standard|0.1.0|
-|Supervisor Management Proxy|Standard|0.4.1|
+|Contour|Standard|1.33.5|
+|ExternalDNS|Standard|0.21.0|
+|Harbor|Standard|2.15.2|
+|Metrics Aggregator|Standard|9.1.1|
+|Supervisor Management Proxy|Standard|9.1.1|
+|Data Services Manager Consumption Operator|Standard|9.1.1|
+|PAIS|Standard|3.0.0|
+|Native Object Store|Standard|9.1.1|
 
 If your air-gapped environment does not have VCF Automation installed, you must also download the Harbor Supervisor Service image so it can be uploaded to the OCI registry on Software Depot for later installation:
 
