@@ -5,15 +5,14 @@ vSphere Kubernetes Service (VKS) is the Kubernetes service that runs on top of v
 
 The procedure involves the following major steps:
 
-1. Copy the required files and binaries from an internet-connected host to the air-gapped environment.
-2. Enable Supervisor on a vCenter in the air-gapped environment.
-3. Upload Kubernetes release OVAs to a vCenter Content Library.
-4. Create vSphere Namespace(s) for the VKS clusters.
-5. Configure the air-gapped Admin host.
-6. Upload the OCI images of Supervisor Services and VKS Standard Packages to the OCI registry on Software Depot using `vcf-download-tool`.
-7. Install the relevant Supervisor Services.
-8. Deploy the VKS cluster(s).
-9. Deploy the VKS Standard Packages on the VKS cluster(s).
+1. Download the required files, binaries, and images on an internet-connected Bastion host and transfer them to the air-gapped environment.
+2. Configure the Admin host and upload all artifacts (Kubernetes releases, VCF CLI and plugins, Supervisor Services, VKS Standard Packages) to the Software Depot.
+3. Enable Supervisor on a vCenter in the air-gapped environment.
+4. Create or verify a Kubernetes release content library subscribed to the Software Depot.
+5. Create vSphere Namespace(s) for the VKS clusters.
+6. Install kubectl and the VCF CLI on the Admin host and log in to the Supervisor.
+7. Install and configure Harbor on the Supervisor.
+8. Deploy the VKS cluster(s) and the VKS Standard Packages.
 
 The data flow of packages, binaries, and images between the internet-connected and air-gapped environments is summarized in the diagram below.
 
@@ -60,7 +59,17 @@ In addition, the following packages and binaries should be installed on both the
 This stage uses the Bastion host (**bastion.internet.lab.test**), which can run Windows or Linux. The following plugins, binaries, and packages must be downloaded; each plays a role in the platform deployment process.
 
 ### 1a. VMware vSphere Kubernetes release OVA files
-VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distribution for VKS clusters. VMware distributes Kubernetes releases as virtual machine templates, which you synchronize with the platform using a vCenter Content Library. Download the latest Kubernetes release files from https://wp-content.broadcom.com/v2/latest/. The versions to download depend on your workload requirements; we recommend downloading three or more of the latest versions. Follow [Step #3 in the official documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/managing-vsphere-kubernetes-service/administering-kubernetes-releases-for-tkg-service-clusters/create-a-local-content-library-for-air-gapped-cluster-provisioning.html) to download the appropriate Kubernetes release files for each version. The VKR shipped with VCF 9.1.1 is version 1.34.2.
+VMware vSphere Kubernetes releases (VKrs) provide the Kubernetes software distribution for VKS clusters. VMware distributes Kubernetes releases as virtual machine templates, which the platform synchronizes through a vCenter Content Library subscribed to the Software Depot. Use `vcf-download-tool` to download the Kubernetes release artifacts into the `depot-store/` directory, using the same `activation-code.txt` created in step 1b.
+
+```bash
+./bin/vcf-download-tool artifacts download \
+    --vcf-version=9.1.1 \
+    --component=VKR \
+    --depot-store=./depot-store \
+    --depot-download-activation-code-file=activation-code.txt
+```
+
+The VKR shipped with VCF 9.1.1 is version 1.34.2.
 
 ### 1b. VCF CLI and Plugins
 The VCF CLI and its plugins are required to interact with Supervisor and VKS clusters. Use `vcf-download-tool` to download the VCF Consumption CLI and its plugin bundle into the `depot-store/` directory, alongside the other artifacts downloaded in the following sections. At the time of writing, VCF CLI 9.1.1 is the supported version for vSphere and Supervisor 9.1.1.
@@ -83,7 +92,7 @@ The VCF CLI and its plugins are required to interact with Supervisor and VKS clu
     --depot-download-activation-code-file=activation-code.txt
 ```
 
-After the VCF CLI and plugins are uploaded to the Software Depot (step 5a), the VCF CLI can be downloaded and installed directly from the vSphere Supervisor landing page on the Admin host (step 5c).
+After the VCF CLI and plugins are uploaded to the Software Depot (step 2b), the VCF CLI can be downloaded and installed directly from the vSphere Supervisor landing page on the Admin host (step 6b).
 
 ### 1c. Binaries and YAML files required for Supervisor Services
 
@@ -163,32 +172,39 @@ VKS Standard Packages let administrators and users add and manage standard servi
 
 ### Summary
 The following files, binaries, and packages have been successfully downloaded in this section and **must be transferred to the Admin host**.
-* Kubernetes Release OVA files.
-* `depot-store/` directory containing all downloaded artifacts (VCF Consumption CLI and plugins, Supervisor Service and VKS Standard Packages OCI bundles).
+* `depot-store/` directory containing all downloaded artifacts (Kubernetes releases, VCF Consumption CLI and plugins, Supervisor Service and VKS Standard Packages OCI bundles).
 * `activation-code.txt` (Broadcom Business Services depot download activation code).
 * Supervisor Service `depot-*` configuration YAML files (downloaded alongside the OCI bundles by `vcf-download-tool`).
 
-## 2. Enable the Supervisor
-Using the steps and directions in the official [documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration.html), configure the required networking, storage policies, and profiles and enable the Supervisor on `vcenter.env1.lab.test`.
-
-## 3. Create a Kubernetes release content library and upload Kubernetes release images
-The Kubernetes release OVAs downloaded on the Bastion host and copied to the Admin host must be uploaded to a Content library within the vCenter. Before proceeding, a local content library must be created. The "Create a Local Content Library (for air-gapped Cluster Provisioning)" [documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/updating-vsphere-supervisor/updating-the-vsphere-with-tanzu-environment/configuring-a-subscribed-content-library-for-supervisor-images-in-air-gapped-environment/create-a-remote-content-library-pulisher-in-a-local-environment.html) provides instructions on creating and importing Kubernetes Release (Kr) images into the content library. **Step #12** provides details on files (downloaded previously in step 1a) that need to be uploaded to the local content library.
-
-## 4. Create vSphere Namespace(s) for VKS Clusters(s)
-If not already created, a vSphere namespace should be created. Refer to "[Create and Configure a vSphere Namespace on the Supervisor](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/configuring-and-managing-vsphere-namespaces/create-and-configure-a-vsphere-namespace.html)" to configure the vSphere Namespace.
-
-## 5. Configure Admin host
-The Admin host (**admin.env1.lab.test**) is essential for the remaining deployment stages. It is used to upload binaries and image bundles to the registry, deploy VKS clusters, and install add-on packages on those clusters &mdash; effectively the control center for the air-gapped deployment. This guide uses an Ubuntu 24.04.4 system with Docker installed. If Docker is not installed, follow the [official Docker documentation](https://docs.docker.com/engine/install/ubuntu/) (some steps must be adapted for an air-gapped installation). The recommended Admin host configuration is:
+## 2. Configure the Admin host and upload artifacts to the Software Depot
+The Admin host (**admin.env1.lab.test**) is essential for the remaining deployment stages. It is used to upload binaries and image bundles to the Software Depot, deploy VKS clusters, and install add-on packages on those clusters &mdash; effectively the control center for the air-gapped deployment. This guide uses an Ubuntu 24.04.4 system with Docker installed. If Docker is not installed, follow the [official Docker documentation](https://docs.docker.com/engine/install/ubuntu/) (some steps must be adapted for an air-gapped installation). The recommended Admin host configuration is:
 * CPU: 2 vCPUs
 * Memory: 4 GB
 * Storage: 150–200 GB of free space
 
-Note: Before moving forward, verify that all the files mentioned in the Summary section in Step 1 have been successfully copied to the Admin host.
-
-### 5a. Upload the VCF CLI and plugins to the Software Depot
-Upload the VCF Consumption CLI and its plugin bundle, downloaded in step 1b, to the Software Depot using `vcf-download-tool`. The tool authenticates via VCF Operations (VCFOps) credentials.
+Before proceeding, verify that all the files listed in the Summary of Step 1 (the `depot-store/` directory, `activation-code.txt`, and the Supervisor Service `depot-*` YAML files) have been copied to the Admin host. All uploads below run from the Admin host with `vcf-download-tool` and authenticate to the Software Depot via VCF Operations (VCFOps) credentials.
 
 To find the Software Depot FQDN, log in to VCF Operations and navigate to **Build &rarr; Lifecycle &rarr; VCF Management &rarr; Components**; the FQDN is shown for the Fleet Software Depot component.
+
+> [!IMPORTANT]
+> Upload the Kubernetes releases (VKR) to the Software Depot **before** enabling the Supervisor (step 3). When the VKRs are present in the Software Depot, the Supervisor enablement workflow can automatically create a subscribed content library for the Kubernetes releases.
+
+### 2a. Upload Kubernetes releases (VKR) to the Software Depot
+Upload the Kubernetes release artifacts downloaded in step 1a. This must be done before Supervisor enablement so that the enablement workflow can auto-create the subscribed VKR content library.
+
+```bash
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=VKR \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+```
+
+### 2b. Upload the VCF CLI and plugins to the Software Depot
+Upload the VCF Consumption CLI and its plugin bundle, downloaded in step 1b. Once uploaded, the VCF CLI can be downloaded directly from the vSphere Supervisor landing page and installed on the Admin host after the Supervisor is enabled (step 6b).
 
 ```bash
 ## Upload the VCF Consumption CLI
@@ -212,9 +228,91 @@ To find the Software Depot FQDN, log in to VCF Operations and navigate to **Buil
     --ops-user-password-file=vcfops.txt
 ```
 
-After the upload completes, the VCF CLI binary and its plugin bundle can be downloaded directly from the vSphere Supervisor landing page and installed on the Admin host (see step 5c).
+### 2c. Upload Supervisor Services to the OCI registry on Software Depot
+Use `vcf-download-tool` to upload all Supervisor Service artifacts from the `depot-store/` directory to the Software Depot OCI registry. No manual OCI write-enable toggle is needed.
 
-### 5b. Download and install kubectl
+```bash
+## Upload all Supervisor Service artifacts from depot-store
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --category=SUPERVISOR_SERVICE \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+
+## Or upload a single Supervisor Service component (example: ArgoCD)
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=SUPERVISOR_SERVICE_ARGOCD \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+
+## Verify the uploaded artifacts on the Software Depot
+./bin/vcf-download-tool depot artifacts list \
+    --vcf-version=9.1.1 \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+```
+
+### 2d. Upload VKS Standard Packages to the OCI registry on Software Depot
+Use `vcf-download-tool` to upload the VKS Standard Packages bundle to the OCI registry on Software Depot.
+
+```bash
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=VKS_STANDARD_PACKAGES \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+```
+
+If your air-gapped environment does not have VCF Automation installed, also upload the Harbor Supervisor Service image:
+
+```bash
+./bin/vcf-download-tool depot artifacts upload \
+    --vcf-version=9.1.1 \
+    --component=SUPERVISOR_SERVICE_HARBOR \
+    --depot-store=./depot-store \
+    --depot-fqdn=<FDS_FQDN> \
+    --ops-fqdn=<OPS_FQDN> \
+    --ops-user=admin \
+    --ops-user-password-file=vcfops.txt
+```
+
+## 3. Enable the Supervisor
+Using the steps and directions in the official [documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration.html), configure the required networking, storage policies, and profiles and enable the Supervisor on `vcenter.env1.lab.test`.
+
+Because the Kubernetes releases (VKR) were uploaded to the Software Depot in step 2a, the Supervisor enablement workflow can automatically create a subscribed content library for the Kubernetes releases, pointing to the Software Depot. Verify this content library in the next step.
+
+## 4. Create or verify the Kubernetes release content library
+The Kubernetes release content library must be subscribed to the Software Depot so that Kubernetes release images are synchronized from it for VKS cluster provisioning.
+
+If Supervisor enablement in step 3 auto-created a subscribed content library for the Kubernetes releases (because the VKRs were uploaded to the Software Depot in step 2a), verify that it is present and synchronized and that it is associated with the Supervisor.
+
+If the environment has an existing Kubernetes content library that is **not** pointing to the Software Depot, create a new subscribed content library that subscribes to the Software Depot VKR subscription URL below, then add it as a Kubernetes content library to the Supervisor after enablement via the **Supervisor &rarr; Configure** UI:
+
+```
+https://<software-depot-domain>/depot-service/content-gateway/VKR/lib.json
+```
+
+Refer to the "[Create a Local Content Library (for air-gapped Cluster Provisioning)](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/updating-vsphere-supervisor/updating-the-vsphere-with-tanzu-environment/configuring-a-subscribed-content-library-for-supervisor-images-in-air-gapped-environment/create-a-remote-content-library-pulisher-in-a-local-environment.html)" documentation for details on creating and associating the content library.
+
+## 5. Create vSphere Namespace(s) for VKS Cluster(s)
+If not already created, a vSphere namespace should be created. Refer to "[Create and Configure a vSphere Namespace on the Supervisor](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/configuring-and-managing-vsphere-namespaces/create-and-configure-a-vsphere-namespace.html)" to configure the vSphere Namespace.
+
+## 6. Configure the Admin host to interact with the Supervisor
+After the Supervisor is enabled, install the tools needed to interact with it on the Admin host.
+
+### 6a. Download and install kubectl
 `kubectl` is the standard command-line tool for interacting with Kubernetes clusters; it is used in this guide to manage Supervisor and VKS clusters together with the VCF CLI. The legacy `kubectl-vsphere` plugin has been deprecated in vSphere 9.1.0 and replaced by the VCF CLI; it is not required for this guide.
 
 You can download and install the `kubectl` binary on the Admin host either from the Supervisor Cluster Kube-API server UI or by running the commands below.
@@ -234,8 +332,8 @@ sudo install kubectl /usr/local/bin/kubectl
 kubectl version
 ```
 
-### 5c. Log in to the Supervisor
-Log in to the Supervisor using the VCF CLI. Now that the VCF CLI and its plugins have been uploaded to the Software Depot (step 5a), download and install them on the Admin host directly from the vSphere Supervisor landing page.
+### 6b. Log in to the Supervisor
+Log in to the Supervisor using the VCF CLI. Now that the VCF CLI and its plugins have been uploaded to the Software Depot (step 2b), download and install them on the Admin host directly from the vSphere Supervisor landing page.
 
 ```bash
 ## Download the VCF CLI from the vSphere Supervisor landing page (Linux/amd64 example)
@@ -273,70 +371,6 @@ vcf context use <context-name>:<namespace-name>
 ## Sample Command to login and use context of namespace ns01 for VKS cluster deployment later.
 vcf context create supervisor1 --endpoint https://supervisor0.env1.lab.test --username administrator@vsphere.local --type k8s
 vcf context use supervisor1:ns01
-```
-
-## 6. Upload packages to the Software Depot
-
-### 6a. Upload Supervisor Services to the OCI registry on Software Depot
-Use `vcf-download-tool` to upload all Supervisor Service artifacts from the `depot-store/` directory to the Software Depot OCI registry. The tool authenticates via VCF Operations (VCFOps) credentials; no manual OCI write-enable toggle is needed.
-
-To find the Software Depot FQDN, log in to VCF Operations and navigate to **Build &rarr; Lifecycle &rarr; VCF Management &rarr; Components**; the FQDN is shown for the Fleet Software Depot component.
-
-```bash
-## Upload all Supervisor Service artifacts from depot-store
-./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.1 \
-    --category=SUPERVISOR_SERVICE \
-    --depot-store=./depot-store \
-    --depot-fqdn=<FDS_FQDN> \
-    --ops-fqdn=<OPS_FQDN> \
-    --ops-user=admin \
-    --ops-user-password-file=vcfops.txt
-
-## Or upload a single Supervisor Service component (example: ArgoCD)
-./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.1 \
-    --component=SUPERVISOR_SERVICE_ARGOCD \
-    --depot-store=./depot-store \
-    --depot-fqdn=<FDS_FQDN> \
-    --ops-fqdn=<OPS_FQDN> \
-    --ops-user=admin \
-    --ops-user-password-file=vcfops.txt
-
-## Verify the uploaded artifacts on the Software Depot
-./bin/vcf-download-tool depot artifacts list \
-    --vcf-version=9.1.1 \
-    --depot-fqdn=<FDS_FQDN> \
-    --ops-fqdn=<OPS_FQDN> \
-    --ops-user=admin \
-    --ops-user-password-file=vcfops.txt
-```
-
-### 6b. Upload VKS Standard Packages to the OCI registry on Software Depot
-Use `vcf-download-tool` to upload the VKS Standard Packages bundle to the OCI registry on Software Depot.
-
-```bash
-./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.1 \
-    --component=VKS_STANDARD_PACKAGES \
-    --depot-store=./depot-store \
-    --depot-fqdn=<FDS_FQDN> \
-    --ops-fqdn=<OPS_FQDN> \
-    --ops-user=admin \
-    --ops-user-password-file=vcfops.txt
-```
-
-If your air-gapped environment does not have VCF Automation installed, also upload the Harbor Supervisor Service image:
-
-```bash
-./bin/vcf-download-tool depot artifacts upload \
-    --vcf-version=9.1.1 \
-    --component=SUPERVISOR_SERVICE_HARBOR \
-    --depot-store=./depot-store \
-    --depot-fqdn=<FDS_FQDN> \
-    --ops-fqdn=<OPS_FQDN> \
-    --ops-user=admin \
-    --ops-user-password-file=vcfops.txt
 ```
 
 ## 7. Ensure Harbor is configured on Supervisor
@@ -390,7 +424,7 @@ VKS Standard Packages can be deployed from the VKS Standard repository using the
 Log in to the VKS workload cluster using the VCF CLI from the Admin host. (The `kubectl-vsphere` plugin is deprecated in vSphere 9.1.0; use `vcf context` instead.)
 
 ```bash
-## Create a VCF CLI context for the Supervisor (if not already created in 5c)
+## Create a VCF CLI context for the Supervisor (if not already created in 6b)
 vcf context create <context-name> --endpoint <SupervisorAPIEndpoint> --username <sso_username> --type k8s
 
 ## Switch the active context to the target VKS workload cluster
