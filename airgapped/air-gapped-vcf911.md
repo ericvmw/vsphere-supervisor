@@ -9,9 +9,9 @@ The procedure involves the following major steps:
 2. Configure the Admin host and upload all artifacts (Kubernetes releases, VCF CLI and plugins, Supervisor Services, VKS Standard Packages) to the Software Depot.
 3. Enable Supervisor on a vCenter in the air-gapped environment.
 4. Create or verify a Kubernetes release content library subscribed to the Software Depot.
-5. Create vSphere Namespace(s) for the VKS clusters.
-6. Install kubectl and the VCF CLI on the Admin host and log in to the Supervisor.
-7. Install and configure Harbor on the Supervisor.
+5. Install and configure Harbor on the Supervisor.
+6. Create vSphere Namespace(s) for the VKS clusters.
+7. Install kubectl and the VCF CLI on the Admin host and log in to the Supervisor.
 8. Deploy the VKS cluster(s) and the VKS Standard Packages.
 
 The data flow of packages, binaries, and images between the internet-connected and air-gapped environments is summarized in the diagram below.
@@ -90,7 +90,7 @@ The VCF CLI and its plugins are required to interact with Supervisor and VKS clu
     --depot-download-activation-code-file=activation-code.txt
 ```
 
-After the VCF CLI and plugins are uploaded to the Software Depot (step 2b), the VCF CLI can be downloaded and installed directly from the vSphere Supervisor landing page on the Admin host (step 6b).
+After the VCF CLI and plugins are uploaded to the Software Depot (step 2b), the VCF CLI can be downloaded and installed directly from the vSphere Supervisor landing page on the Admin host (step 7b).
 
 ### 1c. Binaries and YAML files required for Supervisor Services
 
@@ -205,7 +205,7 @@ Upload the Kubernetes release artifacts downloaded in step 1a. This must be done
 ```
 
 ### 2b. Upload the VCF CLI and plugins to the Software Depot
-Upload the VCF Consumption CLI and its plugin bundle, downloaded in step 1b. Once uploaded, the VCF CLI can be downloaded directly from the vSphere Supervisor landing page and installed on the Admin host after the Supervisor is enabled (step 6b).
+Upload the VCF Consumption CLI and its plugin bundle, downloaded in step 1b. Once uploaded, the VCF CLI can be downloaded directly from the vSphere Supervisor landing page and installed on the Admin host after the Supervisor is enabled and Harbor is configured (step 7b).
 
 ```bash
 ## Upload the VCF Consumption CLI
@@ -307,13 +307,25 @@ https://<software-depot-domain>/depot-service/content-gateway/VKR/lib.json
 
 Refer to the "[Create a Local Content Library (for air-gapped Cluster Provisioning)](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/updating-vsphere-supervisor/updating-the-vsphere-with-tanzu-environment/configuring-a-subscribed-content-library-for-supervisor-images-in-air-gapped-environment/create-a-remote-content-library-pulisher-in-a-local-environment.html)" documentation for details on creating and associating the content library.
 
-## 5. Create vSphere Namespace(s) for VKS Cluster(s)
+## 5. Ensure Harbor is configured on Supervisor
+
+In a VCF deployment that includes VCF Automation, follow [Using Harbor as a VCF service documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/using-harbor-as-a-vcf-service.html) to install and configure Harbor as a VCF service on a Supervisor in a VCF region. Once Harbor VCF service is up and the corresponding Supervisor Service images and VKS Standard Packages images are uploaded to the OCI registry on Software Depot, Supervisor Services and VKS Standard Packages can be installed using the same workflows as in an internet-connected environment.
+
+If your VCF deployment does not include VCF Automation, or you are running a VVF deployment, perform step 5a first, then follow [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) to install the Harbor Supervisor Service manually.
+
+### 5a. Configure a management proxy on the Supervisor to pull Harbor images from Software Depot
+
+Software Depot lives on the management network, so a management proxy is required to pull Harbor Supervisor Service images from it. Follow the steps in KB article [Configure a Management Proxy on Supervisor to Pull Harbor Images from Software Depot in Air-Gapped Environments](setup-harbor-image-pull-mgmt-proxy.md) to deploy the proxy and update the Harbor package YAML image reference. The KB article includes the `manage-depot-image-proxy.sh` script as a downloadable attachment.
+
+After completing the steps in that KB article, continue with registering and installing Harbor using the [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) procedure.
+
+## 6. Create vSphere Namespace(s) for VKS Cluster(s)
 If not already created, a vSphere namespace should be created. Refer to "[Create and Configure a vSphere Namespace on the Supervisor](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-9-0-and-later/9-1/vsphere-supervisor-installation-and-configuration/configuring-and-managing-vsphere-namespaces/create-and-configure-a-vsphere-namespace.html)" to configure the vSphere Namespace.
 
-## 6. Configure the Admin host to interact with the Supervisor
-After the Supervisor is enabled, install the tools needed to interact with it on the Admin host.
+## 7. Configure the Admin host to interact with the Supervisor
+After the Supervisor is enabled and Harbor is configured (step 5), install the tools needed to interact with the Supervisor on the Admin host. Harbor must be configured first because installing the VCF CLI plugins (step 7b) pulls plugin images through Harbor.
 
-### 6a. Download and install kubectl
+### 7a. Download and install kubectl
 `kubectl` is the standard command-line tool for interacting with Kubernetes clusters; it is used in this guide to manage Supervisor and VKS clusters together with the VCF CLI. The legacy `kubectl-vsphere` plugin has been deprecated in vSphere 9.1.0 and replaced by the VCF CLI; it is not required for this guide.
 
 You can download and install the `kubectl` binary on the Admin host either from the Supervisor Cluster Kube-API server UI or by running the commands below.
@@ -333,7 +345,7 @@ sudo install kubectl /usr/local/bin/kubectl
 kubectl version
 ```
 
-### 6b. Log in to the Supervisor
+### 7b. Log in to the Supervisor
 Log in to the Supervisor using the VCF CLI. Now that the VCF CLI and its plugins have been uploaded to the Software Depot (step 2b), download and install them on the Admin host directly from the vSphere Supervisor landing page.
 
 ```bash
@@ -374,18 +386,6 @@ vcf context create supervisor1 --endpoint https://supervisor0.env1.lab.test --us
 vcf context use supervisor1:ns01
 ```
 
-## 7. Ensure Harbor is configured on Supervisor
-
-In a VCF deployment that includes VCF Automation, follow [Using Harbor as a VCF service documentation](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/using-harbor-as-a-vcf-service.html) to install and configure Harbor as a VCF service on a Supervisor in a VCF region. Once Harbor VCF service is up and the corresponding Supervisor Service images and VKS Standard Packages images are uploaded to the OCI registry on Software Depot, Supervisor Services and VKS Standard Packages can be installed using the same workflows as in an internet-connected environment.
-
-If your VCF deployment does not include VCF Automation, or you are running a VVF deployment, perform step 7a first, then follow [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) to install the Harbor Supervisor Service manually.
-
-### 7a. Configure a management proxy on the Supervisor to pull Harbor images from Software Depot
-
-Software Depot lives on the management network, so a management proxy is required to pull Harbor Supervisor Service images from it. Follow the steps in KB article [Configure a Management Proxy on Supervisor to Pull Harbor Images from Software Depot in Air-Gapped Environments](setup-harbor-image-pull-mgmt-proxy.md) to deploy the proxy and update the Harbor package YAML image reference. The KB article includes the `manage-depot-image-proxy.sh` script as a downloadable attachment.
-
-After completing the steps in that KB article, continue with registering and installing Harbor using the [Deploy Harbor Supervisor Service in VVF without VCFA](https://techdocs.broadcom.com/us/en/vmware-cis/vcf/vcf-service-administration-and-development/9-1/using-harbor-as-vcf-service/installing-and-configuring-harbor-and-contour/deploy-harbor-supervisor-service-in-vvf-without-vcfa.html) procedure.
-
 ## 8. Deploy VKS Cluster(s)
 
 ### 8a. Update vSphere Kubernetes Service (VKS) to the latest version
@@ -425,7 +425,7 @@ VKS Standard Packages can be deployed from the VKS Standard repository using the
 Log in to the VKS workload cluster using the VCF CLI from the Admin host. (The `kubectl-vsphere` plugin is deprecated in vSphere 9.1.0; use `vcf context` instead.)
 
 ```bash
-## Create a VCF CLI context for the Supervisor (if not already created in 6b)
+## Create a VCF CLI context for the Supervisor (if not already created in 7b)
 vcf context create <context-name> --endpoint <SupervisorAPIEndpoint> --username <sso_username> --type k8s
 
 ## Switch the active context to the target VKS workload cluster
@@ -436,7 +436,7 @@ vcf context create supervisor1 --endpoint https://supervisor0.env1.lab.test --us
 vcf context use supervisor1:ns01:workload-vsphere-vks1
 ```
 
-After Harbor is installed and configured successfully on the Supervisor in step 7, the default add-on package repository (pointing to Harbor) will be configured and installed automatically. Verify the add-on repository and list the available packages:
+After Harbor is installed and configured successfully on the Supervisor in step 5, the default add-on package repository (pointing to Harbor) will be configured and installed automatically. Verify the add-on repository and list the available packages:
 
 ```bash
 vcf addon repository list
