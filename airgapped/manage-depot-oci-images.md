@@ -1,43 +1,60 @@
-# Making manually uploaded OCI images in Software Depot manageable by vcf-download-tool
+# OCI images uploaded manually to VCF Software Depot are not recognized by vcf-download-tool in VCF 9.1.0 air-gapped environments
 
-## Applicability
-This document is a follow-up to the [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md). It is only relevant if you followed that guide's manual upload path — steps 1c, 1d, 6a, and 6b, which use [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py) to copy OCI images (Supervisor Services, VKS Standard Packages) directly into the Software Depot's OCI registry.
+## Issue
+After deploying VKS in a VCF 9.1.0 air-gapped environment by following the [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md), OCI images for Supervisor Services and VKS Standard Packages that were manually copied into the Software Depot's OCI registry using [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py) (steps 1c, 1d, 6a, and 6b of that guide) do not appear in the output of:
 
-You do **not** need this document if:
-* Your Software Depot has internet connectivity and only used `vcf-download-tool` itself to perform the download and upload of OCI images, or
-* You followed the classic Enterprise-registry guides ([`air-gapped.md`](/airgapped/air-gapped.md), [`air-gapped-vcf90.md`](/airgapped/air-gapped-vcf90.md), [`air-gapped-harbor.md`](/airgapped/air-gapped-harbor.md)), which do not use the Software Depot's OCI registry at all.
+```bash
+vcf-download-tool depot artifacts list \
+    --vcf-version=<vcf-version> --depot-fqdn=<software-depot-fqdn> \
+    --ops-fqdn=<vcf-operations-fqdn> --ops-user=<ops-username> \
+    --ops-user-password-file=<path-to-password-file>
+```
 
-**Goal:** make images that were manually uploaded via `oci_image_depot_migrator.py` visible to `vcf-download-tool`'s own bookkeeping, so VCF download tool treats them as known/managed artifacts.
+The images are physically present in the Software Depot's OCI registry and are fully usable by the Supervisor — the affected Supervisor Services and VKS Standard Packages install and run correctly — but `vcf-download-tool` has no record of them. For example, running the companion script [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py)'s `check` command against such a depot reports the image as **unmanaged**:
 
-**Two ways to get there:**
-1. **(Recommended) Remediate** — run `vcf-download-tool` yourself to download and upload the same artifact through the official tool (see [Section 3](#3-remediate-make-an-image-manageable-via-vcf-download-tool)).
-2. **(Workaround) Delete** — if the upload OCI images are no longer needed or used, delete the unmanaged image from the Software Depot registry instead (see [Section 4](#4-workaround-delete-an-unmanaged-image)).
+```
+Software Depot: fleet-10-144-79-70.vcfd.broadcom.net
+Scanned 3 image(s) across the OCI registry catalog.
 
-## Background
-The manual `imgpkg`-based upload path in `air-gapped-vcf91.md` is to make the images available in a disconnected or offline software depot: Supervisor Service and VKS Standard Package OCI images must already exist in the Software Depot's registry before those services can be installed from it, and the `vcf-download-tool` prior to VCF 9.1.1 doensn't support VCF components with OCI images.
+Managed (2):
+  [OK] vks-standard-packages/ga/3.6.0-20260211/vks-standard-packages:3.6.0-20260211  (component: VKS_STANDARD_PACKAGES)
+  [OK] supervisor-service-contour/ga/1.33.1/contour:v1.33.1_vmware.1  (component: SUPERVISOR_SERVICE_CONTOUR)
 
-`vcf-download-tool`'s own `depot artifacts download`/`upload` commands are the source of truth to manage what artifacts are present in the Software Depot. Images pushed by `oci_image_depot_migrator.py` land in the same OCI registry, but bypass that bookkeeping entirely — so they are invisible to `vcf-download-tool depot artifacts list` even though they are physically present in Software Depot and fully usable by the Supervisor.
+Unmanaged (1) -- known component, not seen by vcf-download-tool:
+  [!!] vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1  (component: SUPERVISOR_SERVICE_ARGOCD)
 
-## Terminology
-* **Software Depot** &mdash; the software depot component of VCF Fleet used to host container images for Supervisor Services and VKS Standard Packages in air-gapped environments.
-* **vcf-download-tool (VCFDT)** &mdash; the Broadcom-provided CLI used to download and upload VCF artifacts (including `depot artifacts`) between an internet-connected host and the Software Depot.
-* **Managed / unmanaged image** &mdash; an image is *managed* if it appears in `vcf-download-tool depot artifacts list`'s output for its component; it is *unmanaged* if it is physically present in the Software Depot's OCI registry but does not appear there.
-* **`--component` identifier** &mdash; the artifact identifier `vcf-download-tool` uses for a given Supervisor Service / package family (e.g. `SUPERVISOR_SERVICE_ARGOCD`, `VKS_STANDARD_PACKAGES`). See the mapping table in [Section 1a](#1a-component-to-repo-path-mapping-reference).
+Action needed: see the unmanaged/unmapped sections above.
+```
 
-## Prerequisites
+## Environment
+* VMware Cloud Foundation (VCF) / VMware vSphere Foundation (VVF) 9.1.0, air-gapped deployment
+* VCF Software Depot (Fleet Depot Server)
+* vcf-download-tool (VCFDT)
+
+This issue does not apply to:
+* VCF / VVF 9.1.1 and later, where `vcf-download-tool depot artifacts download`/`upload` natively supports OCI image components (Supervisor Services, VKS Standard Packages); see the [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md).
+* Deployments using an external Enterprise OCI registry instead of the Software Depot ([`air-gapped.md`](/airgapped/air-gapped.md), [`air-gapped-vcf90.md`](/airgapped/air-gapped-vcf90.md), [`air-gapped-harbor.md`](/airgapped/air-gapped-harbor.md)), which don't involve `vcf-download-tool` for OCI images at all.
+* Software Depots that have direct internet access and used `vcf-download-tool` itself (rather than `oci_image_depot_migrator.py`) to download and upload OCI images.
+
+## Cause
+`vcf-download-tool` prior to VCF 9.1.1 does not support downloading and uploading OCI-image components (Supervisor Services, VKS Standard Packages) to the Software Depot. To make these images available in a disconnected or offline Software Depot on VCF 9.1.0, the [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md) instead uses the `imgpkg`-based [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py) script to copy the images directly into the Software Depot's OCI registry.
+
+`vcf-download-tool`'s own `depot artifacts download`/`upload` commands are the source of truth it uses to know which artifacts are present in the Software Depot. Images pushed by `oci_image_depot_migrator.py` land in the same OCI registry but bypass that bookkeeping entirely, so they remain invisible to `vcf-download-tool depot artifacts list` even though they are physically present and fully usable by the Supervisor. An image in this state is referred to below as **unmanaged**; an image that `vcf-download-tool depot artifacts list` does report is **managed**.
+
+## Resolution
+There are two ways to resolve this. **Making the image manageable (Option 1) is the recommended fix**; deleting the image (Option 2) is a workaround for cases where the image is no longer needed or you cannot run `vcf-download-tool` for that component.
+
+**Prerequisites for both options:**
 * `vcf-download-tool`, installed on a host with network access to both your VCF Operations (`--ops-fqdn`) endpoint and the Software Depot (`--depot-fqdn`). Download it from the Broadcom Support Portal under **My Downloads → VMware Cloud Foundation → VCF Download Tool**.
 * `python3` (already required by `air-gapped-vcf91.md` for `oci_image_depot_migrator.py`).
 * The Software Depot FQDN and VCF version (same values used in `air-gapped-vcf91.md` steps 6a/6b).
 * VCF Operations credentials: `--ops-fqdn`, `--ops-user`, and a file containing the user's password (`--ops-user-password-file`).
-* For the delete workaround only ([Section 4](#4-workaround-delete-an-unmanaged-image)): the VSP host and admin credentials already used with [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh) in `air-gapped-vcf91.md` steps 5c/6c.
+* The companion script [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py), which automates the scan/diff/remediation-command steps below. It reuses `oci_image_depot_migrator.py`'s `require_cmd` helper and shells out to `toggle_software_depot_oci_image_upload.sh` for the delete workaround, so keep all three scripts together in `airgapped/scripts/`.
 
 > [!IMPORTANT]
 > The `depot artifacts` subcommand family used below is the OCI/Carvel-artifact analog of the publicly documented `depot binaries` family (used for management-appliance ISOs) and takes the same `--vcf-version`/`--depot-fqdn`/`--ops-fqdn`/`--ops-user`/`--ops-user-password-file` flags.
 
-The companion script [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py) automates the scan/diff/remediation-command steps below. It reuses `oci_image_depot_migrator.py`'s `require_cmd` helper and shells out to `toggle_software_depot_oci_image_upload.sh` for the delete workaround, so keep all three scripts together in `airgapped/scripts/`.
-
-## 1. Check which Software Depot OCI images are managed
-Run `check` from a host with `imgpkg`-style network access to the Software Depot's registry endpoint and to VCF Operations:
+Before applying either option, run `check` from a host with `imgpkg`-style network access to the Software Depot's registry endpoint and to VCF Operations to identify every unmanaged image:
 
 ```bash
 ./verify_depot_oci_management.py check \
@@ -52,53 +69,7 @@ Run `check` from a host with `imgpkg`-style network access to the Software Depot
     --ops-user-password-file /root/.ops-pw
 ```
 
-Sample output when every image in the depot is managed:
-
-```
-Software Depot: fleet-10-144-79-70.vcfd.broadcom.net
-Scanned 3 image(s) across the OCI registry catalog.
-
-Managed (3):
-  [OK] vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1  (component: SUPERVISOR_SERVICE_ARGOCD)
-  [OK] vks-standard-packages/ga/3.6.0-20260211/vks-standard-packages:3.6.0-20260211  (component: VKS_STANDARD_PACKAGES)
-  [OK] supervisor-service-contour/ga/1.33.1/contour:v1.33.1_vmware.1  (component: SUPERVISOR_SERVICE_CONTOUR)
-
-✅ All 3 image(s) in Software Depot are managed by vcf-download-tool.
-```
-
-Sample output when an image is unmanaged (with remediation commands printed automatically — see [Section 3](#3-remediate-make-an-image-manageable-via-vcf-download-tool)):
-
-```
-Software Depot: fleet-10-144-79-70.vcfd.broadcom.net
-Scanned 3 image(s) across the OCI registry catalog.
-
-Managed (2):
-  [OK] vks-standard-packages/ga/3.6.0-20260211/vks-standard-packages:3.6.0-20260211  (component: VKS_STANDARD_PACKAGES)
-  [OK] supervisor-service-contour/ga/1.33.1/contour:v1.33.1_vmware.1  (component: SUPERVISOR_SERVICE_CONTOUR)
-
-Unmanaged (1) -- known component, not seen by vcf-download-tool:
-  [!!] vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1  (component: SUPERVISOR_SERVICE_ARGOCD)
-
-Remediation commands (run on a host with vcf-download-tool and network access to VCF Operations):
-
-# Unmanaged image: fleet-10-144-79-70.vcfd.broadcom.net/vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1
-# (matched component: SUPERVISOR_SERVICE_ARGOCD; depot tag found: v1.1.0_vmware.1)
-# NOTE: vcf-download-tool's depot-artifacts commands take --vcf-version as the
-# VCF release identifier, not a per-image version; the tag above is shown so
-# you can visually confirm it matches what --vcf-version=9.1.0 will fetch.
-vcf-download-tool depot artifacts download --component=SUPERVISOR_SERVICE_ARGOCD --vcf-version=9.1.0 \
-    --ops-fqdn=ops.env1.lab.test --ops-user=admin@vsp.local --ops-user-password-file=/root/.ops-pw
-vcf-download-tool depot artifacts upload --component=SUPERVISOR_SERVICE_ARGOCD --vcf-version=9.1.0 \
-    --depot-fqdn=fleet-10-144-79-70.vcfd.broadcom.net \
-    --ops-fqdn=ops.env1.lab.test --ops-user=admin@vsp.local --ops-user-password-file=/root/.ops-pw
-
-Action needed: see the unmanaged/unmapped sections above.
-```
-
-`check` exits `0` when everything is managed and `1` when action is needed, so it can be used as a gate in a script or pipeline.
-
-### 1a. Component-to-repo-path mapping reference
-`verify_depot_oci_management.py` matches each repo path discovered in the Software Depot's OCI registry catalog to a `vcf-download-tool` `--component` value using this table (kept in sync with the `REVERSE_MAPPINGS` table in [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py)):
+`check` matches each repo path discovered in the Software Depot's OCI registry catalog to a `vcf-download-tool` `--component` value using the table below (kept in sync with the `REVERSE_MAPPINGS` table in [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py)). A repo path that matches none of these prefixes is reported as **unmapped**, not silently ignored — this usually means either a foreign/unrelated image was pushed to the registry, or Broadcom has introduced a new component this table doesn't yet know about; investigate before assuming it's safe to delete, and update this table (and `COMPONENT_REPO_PREFIXES` in the script) if needed.
 
 |`--component`|Software Depot repo-path prefix|
 |---|---|
@@ -118,36 +89,42 @@ Action needed: see the unmanaged/unmapped sections above.
 |VKSM_EXTENSIONS|/vksm-extensions/ga|
 |VCF_SERVICE_PROTECTION_AND_RECOVERY|/vcf-service-protection-and-recovery/ga|
 
-A repo path that matches none of these prefixes is reported as **unmapped** (see [Section 2](#2-interpreting-the-results)), not silently ignored — update this table (and `COMPONENT_REPO_PREFIXES` in the script) if Broadcom adds a new component you need to manage.
+`check` exits `0` when everything is managed and `1` when action is needed, so it can be used as a gate in a script or pipeline.
 
-## 2. Interpreting the results
-* **Managed** &mdash; the image's component was found in `vcf-download-tool depot artifacts list`'s output. No action needed.
-* **Unmanaged** &mdash; the image's repo path matched a known component (Section 1a), but that component did not appear in `vcf-download-tool`'s managed list. This is the case this document exists to help with — see Sections 3 and 4.
-* **Unmapped** &mdash; the image's repo path did not match *any* entry in the component table. This usually means either a foreign/unrelated image was pushed to the registry, or Broadcom has introduced a new component this document's table doesn't yet know about. Investigate before assuming it's safe to delete; do not treat an unmapped repo as a delete candidate.
+### Option 1 (Recommended): Make the image manageable by vcf-download-tool
+For each unmanaged image, `check` automatically prints a ready-to-run, two-step remediation command pair:
 
-## 3. Remediate: make an image manageable via vcf-download-tool
-For each unmanaged image, `check` prints a ready-to-run, two-step command pair:
+```
+Remediation commands (run on a host with vcf-download-tool and network access to VCF Operations):
 
-```bash
-vcf-download-tool depot artifacts download --component=<COMPONENT> --vcf-version=<vcf-version> \
-    --ops-fqdn=<vcf-operations-fqdn> --ops-user=<ops-username> --ops-user-password-file=<path-to-password-file>
-vcf-download-tool depot artifacts upload --component=<COMPONENT> --vcf-version=<vcf-version> \
-    --depot-fqdn=<software-depot-fqdn> \
-    --ops-fqdn=<vcf-operations-fqdn> --ops-user=<ops-username> --ops-user-password-file=<path-to-password-file>
+# Unmanaged image: fleet-10-144-79-70.vcfd.broadcom.net/vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1
+# (matched component: SUPERVISOR_SERVICE_ARGOCD; depot tag found: v1.1.0_vmware.1)
+# NOTE: vcf-download-tool's depot-artifacts commands take --vcf-version as the
+# VCF release identifier, not a per-image version; the tag above is shown so
+# you can visually confirm it matches what --vcf-version=9.1.0 will fetch.
+vcf-download-tool depot artifacts download --component=SUPERVISOR_SERVICE_ARGOCD --vcf-version=9.1.0 \
+    --ops-fqdn=ops.env1.lab.test --ops-user=admin@vsp.local --ops-user-password-file=/root/.ops-pw
+vcf-download-tool depot artifacts upload --component=SUPERVISOR_SERVICE_ARGOCD --vcf-version=9.1.0 \
+    --depot-fqdn=fleet-10-144-79-70.vcfd.broadcom.net \
+    --ops-fqdn=ops.env1.lab.test --ops-user=admin@vsp.local --ops-user-password-file=/root/.ops-pw
 ```
 
 `--vcf-version` here is always the **VCF release identifier** (e.g. `9.1.0`), not a per-image version — `vcf-download-tool` has no separate per-artifact version flag for this command family. The depot tag `check` found for the unmanaged image is printed as an informational comment above the commands so you can confirm it's the version you expect before running `download`/`upload`.
 
-After running both commands, re-run `check` — the component should now appear under **Managed**.
+After running both commands, re-run `check`. When every image is managed, it prints:
 
-## 4. Workaround: delete an unmanaged image
+```
+✅ All 3 image(s) in Software Depot are managed by vcf-download-tool.
+```
+
+### Option 2 (Workaround): Delete the unmanaged image
 
 > [!IMPORTANT]
-> Deleting an image manifest is **destructive, production-impacting, and effectively irreversible**. Any Supervisor or VKS deployment that still pulls this image by tag will fail after deletion. Use this only if you cannot or do not want to run `vcf-download-tool` for the affected component — remediation (Section 3) is always the preferred path.
+> Deleting an image manifest is **destructive, production-impacting, and effectively irreversible**. Any Supervisor or VKS deployment that still pulls this image by tag will fail after deletion. Use this only if you cannot or do not want to run `vcf-download-tool` for the affected component — Option 1 is always the preferred path.
 
 **Warning:** Deleting a manifest only unlinks it from the registry's tag list; the underlying image blobs are reclaimed only by a separate registry garbage-collection pass, which this script does not perform.
 
-Deletion is gated behind the same [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh) script used in `air-gapped-vcf91.md` steps 5c/6c: `delete` calls it with `enable` before deleting anything, and with `disable` afterward **no matter what** (success, failure, or interruption), so the depot's OCI registry is never left open longer than necessary.
+Deletion is gated behind the same [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh) script used in `air-gapped-vcf91.md` steps 5c/6c: `delete` calls it with `enable` before deleting anything, and with `disable` afterward **no matter what** (success, failure, or interruption), so the depot's OCI registry is never left open longer than necessary. This requires the VSP host and admin credentials already used with that script.
 
 ```bash
 ./verify_depot_oci_management.py delete \
@@ -193,9 +170,15 @@ Summary: 1 succeeded, 0 failed.
 
 Anything other than the exact word `DELETE` (including pressing Enter with no input) aborts before the registry is ever toggled open. For scripted use, `--yes-i-am-sure DELETE` skips the interactive prompt but still requires that exact value.
 
-After the deletion completes, run `./verify_depot_oci_management.py check` again to see which unmanaged images (if any) still remain, and iterate — remediating each one via Section 3 or deleting it via this section — until `check` reports everything as managed or intentionally unmapped.
+After the deletion completes, run `./verify_depot_oci_management.py check` again to see which unmanaged images (if any) still remain, and iterate — remediating each one via Option 1 or deleting it via this option — until `check` reports everything as managed or intentionally unmapped.
 
-## Appendix: verify_depot_oci_management.py reference
+## Additional Information
+* [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md) — the guide whose manual upload path causes this issue.
+* [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md) — the newer guide, unaffected by this issue since `vcf-download-tool` handles OCI images natively from 9.1.1 onward.
+* [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py), [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh), and [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py) — the scripts referenced throughout this article; keep all three together under `airgapped/scripts/`.
+
+<details>
+<summary><code>verify_depot_oci_management.py --help</code> reference</summary>
 
 ```
 $ ./verify_depot_oci_management.py --help
@@ -292,3 +275,5 @@ Examples:
       --vsp-host vsp.env1.lab.test --admin-username admin@vsp.local \
       --admin-password '...' --dry-run
 ```
+
+</details>
