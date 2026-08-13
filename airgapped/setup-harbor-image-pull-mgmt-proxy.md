@@ -21,7 +21,9 @@ Symptoms include:
 
 - VMware vSphere Foundation (VVF) 9.1.1
 - VMware Cloud Foundation (VCF) 9.1.1 without VCF Automation
-- Air-gapped or internet-restricted deployments using the VCF Software Depot OCI registry
+- Air-gapped or internet-restricted deployments where the VCF Software Depot is configured in **disconnected or offline depot mode**, using the VCF Software Depot OCI registry
+
+> **Note:** Do not use `manage-depot-image-proxy.sh` on a VCF 9.1.1 deployment where the Software Depot is configured in **online mode** (i.e., the Software Depot itself has direct internet connectivity). This management proxy together with the manual Harbor bootstrap workflow it supports, are required only for disconnected or offline depot mode.
 
 ---
 
@@ -44,7 +46,7 @@ A Kubernetes `Service` of type `ExternalName` (named `depot-image-proxy`) must b
 
 - The Admin host has `ssh`, `sshpass`, and `openssl` installed.
 - The Software Depot endpoint is already configured on the vCenter and the Supervisor (visible under **Supervisor → Configure → Supervisor → Network → Management Porxy Configuration → `vcf-depot` management service**).
-- The Harbor Supervisor Service OCI image has been uploaded to the Software Depot OCI registry (see [VKS Deployment Guide for VCF 9.1.1 air-gapped environments](air-gapped-vcf911.md), step 2d).
+- The Harbor Supervisor Service OCI images have been uploaded to the Software Depot in disconnected or offline depot mode via VCF download tool (see ["Deploy in AirGapped Environments"](https://docworks.broadcom.net/docworks-review/cms?type=AEM&documentIds=GUID-ab1ea5ea-26f1-4572-abe6-ada6505ade6e-en&aemPubId=2584&reviewId=8903&topicToNavigate=GUID-9afcafd3-7d2c-46fd-9612-24fd9855c0d5-en.dita) _(docworks review link — to be replaced with the published techdocs URL once available)_).
 - You have the vCenter FQDN, vCenter root SSH password, vCenter admin credentials, and the Supervisor ID.
 
 ### Step 1: Download the `manage-depot-image-proxy.sh` script
@@ -61,12 +63,21 @@ The script requires the Supervisor ID. Retrieve it from the vCenter REST API or 
 
 ```bash
 ## Query the vCenter REST API for the list of Supervisors (requires vCenter admin credentials)
-SESSION_ID=$(curl -k -s -u "administrator@vsphere.local:<password>" -X POST "https://vcenter.env1.lab.test/api/session" | tr -d '"')
+SESSION_ID=$(curl -k -s -u 'administrator@vsphere.local:<password>' -X POST "https://vcenter.env1.lab.test/api/session" | tr -d '"')
 curl -k -s -X GET -H "vmware-api-session-id: $SESSION_ID" \
-    https://vcenter.env1.lab.test/api/vcenter/namespace-management/supervisors/summaries" | jq -r '.items.[].supervisor'
+    "https://vcenter.env1.lab.test/api/vcenter/namespace-management/supervisors/summaries" | jq -r '.items.[].supervisor'
 ```
 
 ### Step 3: Add the management proxy to the Supervisor
+
+> [!IMPORTANT]
+> This script SSHs into vCenter and runs `bash` non-interactively. By default, SSH sessions on the vCenter Server Appliance land in the restricted **appliancesh** shell, which cannot execute this and will fail with `Unknown command: 'bash'`. Before running the script, on the vCenter Server Appliance:
+> 1. Enable **SSH Login** and activate **BASH Shell** access via the vCenter Server Management Interface (VAMI, `https://<vcenter>:5480` → **Access**).
+> 2. Change root's login shell to bash so non-interactive SSH commands actually execute as bash: `chsh -s /bin/bash root`.
+>
+> **After the script finishes, revert both changes** to restore the appliance's default security posture:
+> 1. Change root's login shell back to the restricted appliance shell: `chsh -s /bin/appliancesh root`.
+> 2. Disable **BASH Shell** access via VAMI (and **SSH Login**, if it was not already enabled for other purposes).
 
 Run the script with the `add` action. The script SSHs into the vCenter, then from vCenter into each Supervisor control plane VM, and deploys the `depot-image-proxy` service in the `kube-system` namespace.
 
