@@ -601,14 +601,14 @@ Examples:
     )
 
     parser = argparse.ArgumentParser(
-        prog="verify_depot_oci_management.py",
+        prog="manage_depot_manual_oci_images.py",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=description,
         epilog=epilog,
     )
     parser.add_argument("action", choices=["check", "delete"], metavar="ACTION", help="check | delete (see examples below).")
 
-    parser.add_argument("--depot-fqdn", required=True, metavar="FQDN", help="Software Depot (Fleet Depot Server) FQDN.")
+    parser.add_argument("--depot-fqdn", required=True, metavar="FQDN", help="Software Depot FQDN.")
     parser.add_argument(
         "--vcf-version", required=True, metavar="VER",
         help="VCF release identifier, e.g. 9.1.0. Passed through to vcf-download-tool.",

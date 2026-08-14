@@ -10,7 +10,7 @@ vcf-download-tool depot artifacts list \
     --ops-user-password-file=<path-to-password-file>
 ```
 
-The images are physically present in the Software Depot's OCI registry and are fully usable by the Supervisor — the affected Supervisor Services and VKS Standard Packages install and run correctly — but `vcf-download-tool` has no record of them. For example, running the companion script [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py)'s `check` command against such a depot reports the image as **unmanaged**:
+The images are physically present in the Software Depot's OCI registry and are fully usable by the Supervisor — the affected Supervisor Services and VKS Standard Packages install and run correctly — but `vcf-download-tool` has no record of them. For example, running the companion script [`manage_depot_manual_oci_images.py`](scripts/manage_depot_manual_oci_images.py)'s `check` command against such a depot reports the image as **unmanaged**:
 
 ```
 Software Depot: fleet-10-144-79-70.vcfd.broadcom.net
@@ -28,11 +28,11 @@ Action needed: see the unmanaged/unmapped sections above.
 
 ## Environment
 * VMware Cloud Foundation (VCF) / VMware vSphere Foundation (VVF) 9.1.0, air-gapped deployment
-* VCF Software Depot (Fleet Depot Server)
+* VCF Software Depot
 * vcf-download-tool (VCFDT)
 
 This issue does not apply to:
-* VCF / VVF 9.1.1 and later, where `vcf-download-tool depot artifacts download`/`upload` natively supports OCI image components (Supervisor Services, VKS Standard Packages); see the [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md).
+* VCF / VVF 9.1.1 and later, where `vcf-download-tool depot artifacts download`/`upload` natively supports OCI image components (Supervisor Services, VKS Standard Packages); see the [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md) _(to be replaced by techdoc link)_.
 * Deployments using an external Enterprise OCI registry instead of the Software Depot ([`air-gapped.md`](/airgapped/air-gapped.md), [`air-gapped-vcf90.md`](/airgapped/air-gapped-vcf90.md), [`air-gapped-harbor.md`](/airgapped/air-gapped-harbor.md)), which don't involve `vcf-download-tool` for OCI images at all.
 * Software Depots that have direct internet access and used `vcf-download-tool` itself (rather than `oci_image_depot_migrator.py`) to download and upload OCI images.
 
@@ -49,7 +49,7 @@ There are two ways to resolve this. **Making the image manageable (Option 1) is 
 * `python3` (already required by `air-gapped-vcf91.md` for `oci_image_depot_migrator.py`).
 * The Software Depot FQDN and VCF version (same values used in `air-gapped-vcf91.md` steps 6a/6b).
 * VCF Operations credentials: `--ops-fqdn`, `--ops-user`, and a file containing the user's password (`--ops-user-password-file`).
-* The companion script [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py), which automates the scan/diff/remediation-command steps below. It reuses `oci_image_depot_migrator.py`'s `require_cmd` helper and shells out to `toggle_software_depot_oci_image_upload.sh` for the delete workaround, so keep all three scripts together in `airgapped/scripts/`.
+* The companion script [`manage_depot_manual_oci_images.py`](scripts/manage_depot_manual_oci_images.py), which automates the scan/diff/remediation-command steps below. It reuses `oci_image_depot_migrator.py`'s `require_cmd` helper and shells out to `toggle_software_depot_oci_image_upload.sh` for the delete workaround, so keep all three scripts together in `airgapped/scripts/`.
 
 > [!IMPORTANT]
 > The `depot artifacts` subcommand family used below is the OCI/Carvel-artifact analog of the publicly documented `depot binaries` family (used for management-appliance ISOs) and takes the same `--vcf-version`/`--depot-fqdn`/`--ops-fqdn`/`--ops-user`/`--ops-user-password-file` flags.
@@ -57,13 +57,13 @@ There are two ways to resolve this. **Making the image manageable (Option 1) is 
 Before applying either option, run `check` from a host with `imgpkg`-style network access to the Software Depot's registry endpoint and to VCF Operations to identify every unmanaged image:
 
 ```bash
-./verify_depot_oci_management.py check \
+./manage_depot_manual_oci_images.py check \
     --depot-fqdn <software-depot-fqdn> --vcf-version <vcf-version> \
     --ops-fqdn <vcf-operations-fqdn> --ops-user <ops-username> \
     --ops-user-password-file <path-to-password-file>
 
 ## Sample Command
-./verify_depot_oci_management.py check \
+./manage_depot_manual_oci_images.py check \
     --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \
     --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \
     --ops-user-password-file /root/.ops-pw
@@ -127,7 +127,7 @@ After running both commands, re-run `check`. When every image is managed, it pri
 Deletion is gated behind the same [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh) script used in `air-gapped-vcf91.md` steps 5c/6c: `delete` calls it with `enable` before deleting anything, and with `disable` afterward **no matter what** (success, failure, or interruption), so the depot's OCI registry is never left open longer than necessary. This requires the VSP host and admin credentials already used with that script.
 
 ```bash
-./verify_depot_oci_management.py delete \
+./manage_depot_manual_oci_images.py delete \
     --depot-fqdn <software-depot-fqdn> --vcf-version <vcf-version> \
     --ops-fqdn <vcf-operations-fqdn> --ops-user <ops-username> \
     --ops-user-password-file <path-to-password-file> \
@@ -135,7 +135,7 @@ Deletion is gated behind the same [`toggle_software_depot_oci_image_upload.sh`](
     [--repo <repo-path>] [--tag <tag>] [--dry-run]
 
 ## Sample Command (dry run first, strongly recommended)
-./verify_depot_oci_management.py delete \
+./manage_depot_manual_oci_images.py delete \
     --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \
     --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \
     --ops-user-password-file /root/.ops-pw \
@@ -170,30 +170,30 @@ Summary: 1 succeeded, 0 failed.
 
 Anything other than the exact word `DELETE` (including pressing Enter with no input) aborts before the registry is ever toggled open. For scripted use, `--yes-i-am-sure DELETE` skips the interactive prompt but still requires that exact value.
 
-After the deletion completes, run `./verify_depot_oci_management.py check` again to see which unmanaged images (if any) still remain, and iterate — remediating each one via Option 1 or deleting it via this option — until `check` reports everything as managed or intentionally unmapped.
+After the deletion completes, run `./manage_depot_manual_oci_images.py check` again to see which unmanaged images (if any) still remain, and iterate — remediating each one via Option 1 or deleting it via this option — until `check` reports everything as managed or intentionally unmapped.
 
 ## Additional Information
 * [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md) — the guide whose manual upload path causes this issue.
-* [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md) — the newer guide, unaffected by this issue since `vcf-download-tool` handles OCI images natively from 9.1.1 onward.
-* [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py), [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh), and [`verify_depot_oci_management.py`](scripts/verify_depot_oci_management.py) — the scripts referenced throughout this article; keep all three together under `airgapped/scripts/`.
+* [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md) _(to be replaced by techdoc link)_ — the newer guide, unaffected by this issue since `vcf-download-tool` handles OCI images natively from 9.1.1 onward.
+* [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py), [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh), and [`manage_depot_manual_oci_images.py`](scripts/manage_depot_manual_oci_images.py) — the scripts referenced throughout this article; keep all three together under `airgapped/scripts/`.
 
 <details>
-<summary><code>verify_depot_oci_management.py --help</code> reference</summary>
+<summary><code>manage_depot_manual_oci_images.py --help</code> reference</summary>
 
 ```
-$ ./verify_depot_oci_management.py --help
-usage: verify_depot_oci_management.py [-h] --depot-fqdn FQDN --vcf-version VER
-                                      --ops-fqdn FQDN --ops-user USER
-                                      --ops-user-password-file FILE
-                                      [--vcf-download-tool PATH]
-                                      [--component COMPONENT] [--json]
-                                      [--vsp-host HOST]
-                                      [--admin-username USER]
-                                      [--admin-password PASS]
-                                      [--toggle-script PATH] [--repo REPO]
-                                      [--tag TAG] [--dry-run]
-                                      [--yes-i-am-sure WORD]
-                                      ACTION
+$ ./manage_depot_manual_oci_images.py --help
+usage: manage_depot_manual_oci_images.py [-h] --depot-fqdn FQDN --vcf-version
+                                         VER --ops-fqdn FQDN --ops-user USER
+                                         --ops-user-password-file FILE
+                                         [--vcf-download-tool PATH]
+                                         [--component COMPONENT] [--json]
+                                         [--vsp-host HOST]
+                                         [--admin-username USER]
+                                         [--admin-password PASS]
+                                         [--toggle-script PATH] [--repo REPO]
+                                         [--tag TAG] [--dry-run]
+                                         [--yes-i-am-sure WORD]
+                                         ACTION
 
 Detect Software Depot OCI images uploaded via oci_image_depot_migrator.py that
 are not managed by vcf-download-tool, print remediation commands, and optionally
@@ -207,7 +207,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  --depot-fqdn FQDN     Software Depot (Fleet Depot Server) FQDN.
+  --depot-fqdn FQDN     Software Depot FQDN.
   --vcf-version VER     VCF release identifier, e.g. 9.1.0. Passed through to
                         vcf-download-tool.
   --ops-fqdn FQDN       VCF Operations FQDN. Passed through to vcf-download-
@@ -263,12 +263,12 @@ Actions:
           even on failure or Ctrl-C).
 
 Examples:
-  verify_depot_oci_management.py check \
+  manage_depot_manual_oci_images.py check \
       --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \
       --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \
       --ops-user-password-file /root/.ops-pw
 
-  verify_depot_oci_management.py delete \
+  manage_depot_manual_oci_images.py delete \
       --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \
       --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \
       --ops-user-password-file /root/.ops-pw \
