@@ -23,7 +23,7 @@ Managed (2):
 Unmanaged (1) -- known component, not seen by vcf-download-tool for --vcf-version=9.1 (may be available under a different VCF version):
   [!!] vcf-service-argocd/ga/1.1.0/argocd-service:v1.1.0_vmware.1  (component: SUPERVISOR_SERVICE_ARGOCD)
 
-Action needed: see the unmanaged/unmapped sections above.
+Action needed: see the unmanaged section above.
 ```
 
 ## Environment
@@ -121,8 +121,9 @@ Log file: /home/worker/fds/log/vdt.log
 Software Depot: fleet-10-161-10-187.vcfd.broadcom.net
 Scanned 53 image(s) across the OCI registry catalog.
 
-Managed (17):
+Managed (24):
   [OK] supervisor-service-harbor/ga/2.15.2/harbor:v2.15.2_vmware.1-vks.1  (component: SUPERVISOR_SERVICE_HARBOR)  (+16 other tag(s) in this image repo)
+  [OK] vcf-service-data-services/ga/9.1.1.0/dsm-consumption-operator-supervisor:9.1.1.0.25623779  (component: DSM)  (+6 other tag(s) in this image repo)
 
 Unmanaged (29) -- known component, not seen by vcf-download-tool for --vcf-version=9.1.1 (may be available under a different VCF version):
   [!!] supervisor-service-harbor/ga/2.14.2/harbor:v2.14.2_vmware.2-vks.1  (component: SUPERVISOR_SERVICE_HARBOR)  (+16 other tag(s) in this image repo)
@@ -132,15 +133,12 @@ Remediation commands (run on a host with vcf-download-tool and network access to
 
 ... (one two-step download/upload command pair per unmanaged repo -- see the format under "Option 1" below) ...
 
-Unmapped (7) -- no known component mapping; update COMPONENT_REPO_PREFIXES if these are expected:
-  [??] vcf-service-data-services/ga/9.1.1.0/dsm-consumption-operator-supervisor:9.1.1.0.25623779  (+6 other tag(s) in this image repo)
-
-Action needed: see the unmanaged/unmapped sections above.
+Action needed: see the unmanaged section above.
 ```
 
 If you're redirecting `check`'s output to a file or `tee` for a record, expect the certificate dump and these prompts to appear inline with the rest of the output, since stdout and stderr are merged and streamed live for exactly this reason -- so that the prompts are visible in time for you to answer them, instead of being buffered until the command exits.
 
-`check` matches each repo path discovered in the Software Depot's OCI registry catalog to a `vcf-download-tool` `--component` value using the table below (kept in sync with the `REVERSE_MAPPINGS` table in [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py)). A repo path that matches none of these prefixes is reported as **unmapped**, not silently ignored — this usually means either a foreign/unrelated image was pushed to the registry, or Broadcom has introduced a new component this table doesn't yet know about; investigate before assuming it's safe to delete, and update this table (and `COMPONENT_REPO_PREFIXES` in the script) if needed.
+`check` matches each repo path discovered in the Software Depot's OCI registry catalog to a `vcf-download-tool` `--component` value using the table below (sourced from the `external_repo` field of each component in Broadcom's UPT packages-publish manifest for the release this table was last refreshed against).
 
 |`--component`|Software Depot repo-path prefix|
 |---|---|
@@ -159,8 +157,30 @@ If you're redirecting `check`'s output to a file or `tee` for a record, expect t
 |SUPERVISOR_SERVICE_CA_CLUSTERISSUER|/supervisor-service-ca-clusterissuer/ga|
 |VKSM_EXTENSIONS|/vksm-extensions/ga|
 |VCF_SERVICE_PROTECTION_AND_RECOVERY|/vcf-service-protection-and-recovery/ga|
+|VKR|/vsphere-kubernetes-release/ga|
+|DSM|/vcf-service-data-services/ga|
+|VCF_SERVICE_HARBOR|/vcf-service-harbor/ga|
+|VCF_SERVICE_METRICS_AGGREGATOR|/vcf-service-metrics-aggregator/ga|
+|VCF_SERVICE_MIGRATION|/vcf-service-migration/ga|
+|VCF_SERVICE_ENCRYPTION_MANAGEMENT|/vcf-service-encryption-management/ga|
+|VCF_SERVICE_VKSM_AUTO_ATTACH|/vcf-service-vksm-auto-attach/ga|
 
-`check` exits `0` when everything is managed and `1` when action is needed, so it can be used as a gate in a script or pipeline.
+> [!NOTE]
+> `VCF_SERVICE_DATA_SERVICES` is intentionally not in this table: its repo path (`/vcf-service-data-services/ga`) is identical to DSM's, and this script's prefix-only matching can't tell the two components' images apart by filename further down the path. A `VCF_SERVICE_DATA_SERVICES` image would surface as unmapped rather than being misattributed to DSM.
+
+A repo path that matches none of these prefixes is reported as **unmapped**. This is an informational warning, not an error — it does not affect `check`'s exit code, and `check` does not suggest remediation or deletion for unmapped images. This table is a static snapshot and will inevitably lag whatever Broadcom actually ships: an unmapped image could be a component released after this table was last refreshed, just as easily as it could be a foreign/unrelated image. For example:
+
+```
+Unmapped (1) -- not matched to a known component in this script's COMPONENT_REPO_PREFIXES table (informational warning, not an error):
+  [??] some-new-service/ga/1.0.0/some-new-service:1.0.0
+
+This does not necessarily indicate a problem -- COMPONENT_REPO_PREFIXES can lag behind the
+actual set of released components, so these could be valid images from a component added
+after this table was last updated. No remediation or deletion is suggested for unmapped
+images; investigate only if a repo path looks unfamiliar or unexpected.
+```
+
+`check` exits `0` when there are no unmanaged images (unmapped images alone never cause a non-zero exit) and `1` when unmanaged images need action, so it can be used as a gate in a script or pipeline.
 
 ### Option 1 (Recommended): Make the image manageable by vcf-download-tool
 For each unmanaged image, `check` automatically prints a ready-to-run, two-step remediation command pair:
@@ -365,9 +385,11 @@ Actions:
   check   Scan the Software Depot OCI registry catalog and cross-reference it
           against `vcf-download-tool depot artifacts list`. Reports managed,
           unmanaged (known component, not seen by vcf-download-tool), and
-          unmapped (no known component) images, and prints remediation
-          commands for unmanaged images. Exit code 0 if everything is
-          managed, 1 if action is needed.
+          unmapped (no known component match -- an informational warning
+          only, not an error) images, and prints remediation commands for
+          unmanaged images. Exit code 0 if there are no unmanaged images
+          (unmapped images alone do not affect the exit code), 1 if
+          unmanaged images need action.
 
   delete  Delete unmanaged image manifest(s) from the Software Depot OCI
           registry. Requires exactly one of --all (every unmanaged image) or
@@ -388,7 +410,7 @@ Examples:
 
   # --vcf-version defaults to 9.1.0 for 'delete' instead (see --vcf-version
   # above for why); omit it unless these images were uploaded for a different
-  # VCF release. Remove --dry-run to delete all untracked images from the
+  # VCF release. Remove --dry-run to delete the specified images from the
   # Software Depot.
   manage_depot_manual_oci_images.py delete --all \
       --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net \

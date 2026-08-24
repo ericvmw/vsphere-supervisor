@@ -28,18 +28,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import oci_image_depot_migrator as migrator  # noqa: E402  (sibling script, same dir)
 
 # Static map: vcf-download-tool --component identifier -> Software Depot OCI
-# repo-path PREFIX (leading slash, no trailing slash, no tag). Derived from
-# REVERSE_MAPPINGS in oci_image_depot_migrator.py by stripping each entry's
-# "/$1" (and "/$1/...:$2") capture-group suffix down to the common literal
-# prefix. Keep this in sync with REVERSE_MAPPINGS if that list changes.
+# repo-path PREFIX (leading slash, no trailing slash, no tag). Sourced from the
+# "external_repo" field (2nd entry, the Software Depot/FDS-style path) of each
+# component's registry_type_artifacts in the UPT packages-publish manifest,
+# e.g. https://build-squid.vcfd.broadcom.net/build/mts/release/<build>/publish/PROD/metadata/uptManifests/upt_packages_publish.json,
+# truncated after the "ga" path segment that all of these repo paths share.
+# This list necessarily lags whatever manifest is current for a given VCF
+# release -- new components can and do appear over time. A repo that matches
+# none of these prefixes is reported as "unmapped" (a warning, not an error;
+# see print_check_report), never silently dropped.
 #
-# Deliberately excluded (not managed by this script): "Harbor VCF service"
-# (/vcf-service-harbor/ga), "Metrics aggregator VCF service"
-# (/vcf-service-metrics-aggregator/ga), VKR baker image, data consumption,
-# encryption management, VCD migration, and "VKSM auto attach VCF service"
-# (/vcf-service-vksm-auto-attach/ga -- distinct from VKSM_EXTENSIONS below).
-# Repos that match none of these prefixes are reported as "unmapped", never
-# silently dropped.
+# Deliberately excluded: VCF_SERVICE_DATA_SERVICES ("/vcf-service-data-services/ga")
+# is not mapped because it shares that exact prefix with DSM below -- this
+# script's prefix-only matching can't disambiguate the two components' images
+# by their differing filenames (data-services vs. dsm-consumption-operator-
+# supervisor) further down the path. DSM is the one actually seen as a
+# top-level vcf-download-tool component in practice, so the shared prefix maps
+# there; a VCF_SERVICE_DATA_SERVICES image would surface as unmapped.
 COMPONENT_REPO_PREFIXES: dict[str, str] = {
     "SUPERVISOR_SERVICE_ARGOCD": "/vcf-service-argocd/ga",
     "SUPERVISOR_SERVICE_HARBOR": "/supervisor-service-harbor/ga",
@@ -56,6 +61,13 @@ COMPONENT_REPO_PREFIXES: dict[str, str] = {
     "SUPERVISOR_SERVICE_CA_CLUSTERISSUER": "/supervisor-service-ca-clusterissuer/ga",
     "VKSM_EXTENSIONS": "/vksm-extensions/ga",
     "VCF_SERVICE_PROTECTION_AND_RECOVERY": "/vcf-service-protection-and-recovery/ga",
+    "VKR": "/vsphere-kubernetes-release/ga",
+    "DSM": "/vcf-service-data-services/ga",
+    "VCF_SERVICE_HARBOR": "/vcf-service-harbor/ga",
+    "VCF_SERVICE_METRICS_AGGREGATOR": "/vcf-service-metrics-aggregator/ga",
+    "VCF_SERVICE_MIGRATION": "/vcf-service-migration/ga",
+    "VCF_SERVICE_ENCRYPTION_MANAGEMENT": "/vcf-service-encryption-management/ga",
+    "VCF_SERVICE_VKSM_AUTO_ATTACH": "/vcf-service-vksm-auto-attach/ga",
 }
 
 _LINK_NEXT_RE = re.compile(r'<([^>]+)>\s*;\s*rel="next"')
@@ -498,7 +510,7 @@ def print_check_report(report: Report, args: argparse.Namespace) -> int:
             "unmapped": [vars(i) for i in report.unmapped],
         }
         print(json.dumps(payload, indent=2))
-        return 0 if not report.unmanaged and not report.unmapped else 1
+        return 0 if not report.unmanaged else 1
 
     print(f"Software Depot: {args.depot_fqdn}")
     print(f"Scanned {total} image(s) across the OCI registry catalog.\n")
@@ -521,17 +533,29 @@ def print_check_report(report: Report, args: argparse.Namespace) -> int:
 
     if report.unmapped:
         print(
-            f"Unmapped ({len(report.unmapped)}) -- no known component mapping; "
-            "update COMPONENT_REPO_PREFIXES if these are expected:"
+            f"Unmapped ({len(report.unmapped)}) -- not matched to a known component in this "
+            "script's COMPONENT_REPO_PREFIXES table (informational warning, not an error):"
         )
         print_grouped_images(report.unmapped, "[??]")
-        print()
+        print(
+            "This does not necessarily indicate a problem -- COMPONENT_REPO_PREFIXES can lag "
+            "behind the actual set of released components, so these could be valid images "
+            "from a component added after this table was last updated. No remediation or "
+            "deletion is suggested for unmapped images; investigate only if a repo path looks "
+            "unfamiliar or unexpected.\n"
+        )
 
-    if not report.unmanaged and not report.unmapped:
-        print(f"✅ All {total} image(s) in Software Depot are managed by vcf-download-tool.")
+    if not report.unmanaged:
+        if report.unmapped:
+            print(
+                f"✅ No unmanaged images found ({len(report.unmapped)} image(s) unmapped -- "
+                "see the warning above)."
+            )
+        else:
+            print(f"✅ All {total} image(s) in Software Depot are managed by vcf-download-tool.")
         return 0
 
-    print("Action needed: see the unmanaged/unmapped sections above.")
+    print("Action needed: see the unmanaged section above.")
     return 1
 
 
@@ -734,9 +758,11 @@ Actions:
   check   Scan the Software Depot OCI registry catalog and cross-reference it
           against `vcf-download-tool depot artifacts list`. Reports managed,
           unmanaged (known component, not seen by vcf-download-tool), and
-          unmapped (no known component) images, and prints remediation
-          commands for unmanaged images. Exit code 0 if everything is
-          managed, 1 if action is needed.
+          unmapped (no known component match -- an informational warning
+          only, not an error) images, and prints remediation commands for
+          unmanaged images. Exit code 0 if there are no unmanaged images
+          (unmapped images alone do not affect the exit code), 1 if
+          unmanaged images need action.
 
   delete  Delete unmanaged image manifest(s) from the Software Depot OCI
           registry. Requires exactly one of --all (every unmanaged image) or
