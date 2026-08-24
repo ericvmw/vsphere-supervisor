@@ -77,24 +77,41 @@ require_cmd = migrator.require_cmd
 
 
 def run_capture(args: list[str], *, step: str = "") -> str:
-    """Like migrator.run_cmd, but captures and returns stdout instead of discarding it."""
+    """Like migrator.run_cmd, but captures and returns stdout instead of discarding it.
+
+    stdin is inherited from this process (not /dev/null), and stdout/stderr are
+    streamed live to our own stderr as they arrive, in addition to being
+    captured. vcf-download-tool prompts interactively the first time it talks
+    to a given depot/ops-fqdn (TLS certificate chain trust, then CEIP opt-in);
+    with stdin redirected to /dev/null those prompts hit immediate EOF and the
+    tool aborts with a Java NoSuchElementException instead of a real answer.
+    Inheriting stdin lets an operator running this script from a real terminal
+    see and answer those prompts; live-streaming is required so the prompt
+    text is visible before the operator has to type a response (it would
+    otherwise sit buffered until the process exits). Any such prompt/progress
+    text is harmless to the caller: parse_managed_versions() only recognizes
+    pipe-delimited table rows and silently ignores everything else.
+    """
     print(f"+ {' '.join(args)}", file=sys.stderr)
-    r = subprocess.run(
+    proc = subprocess.Popen(
         args,
-        stdin=subprocess.DEVNULL,
+        stdin=None,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
+        bufsize=1,
     )
-    if r.returncode != 0:
+    assert proc.stdout is not None
+    captured_lines: list[str] = []
+    for line in proc.stdout:
+        print(line, end="", file=sys.stderr)
+        captured_lines.append(line)
+    proc.wait()
+    if proc.returncode != 0:
         prefix = f"{step}: " if step else ""
-        print(f"Error: {prefix}command failed with exit code {r.returncode}.", file=sys.stderr)
-        if r.stderr:
-            print(r.stderr, file=sys.stderr)
-        sys.exit(r.returncode)
-    if r.stderr:
-        print(r.stderr, file=sys.stderr, end="" if r.stderr.endswith("\n") else "\n")
-    return r.stdout
+        print(f"Error: {prefix}command failed with exit code {proc.returncode}.", file=sys.stderr)
+        sys.exit(proc.returncode)
+    return "".join(captured_lines)
 
 
 # --- TLS / HTTP (stdlib only; -k-equivalent to match the repo's curl -k convention) ---
@@ -222,10 +239,9 @@ def scan_depot(depot_fqdn: str, only_components: Optional[set[str]] = None) -> l
         component = match_component_for_repo(repo)
         if only_components and component not in only_components:
             continue
+        # A repo path with no tags at all isn't a pullable image -- nothing to
+        # manage or report on, so skip it rather than fabricating a placeholder.
         tags = list_repo_tags(depot_fqdn, repo)
-        if not tags:
-            images.append(RepoImage(repo=repo, tag="<none>", component=component))
-            continue
         for tag in tags:
             images.append(RepoImage(repo=repo, tag=tag, component=component))
     return images
@@ -257,56 +273,96 @@ def run_vcf_download_tool_list(
     )
 
 
-def parse_managed_components(list_output: str, known_components: Iterable[str]) -> set[str]:
+def parse_managed_versions(list_output: str, known_components: Iterable[str]) -> dict[str, Optional[list[str]]]:
     """
-    Defensive two-pass parse of `vcf-download-tool depot artifacts list` output.
+    Two-pass parse of `vcf-download-tool depot artifacts list` output.
 
-    A false "unmanaged" is the dangerous failure mode (it feeds the delete
-    workflow), so this function is deliberately biased toward over-matching
-    "managed": it unions (never intersects) a strict tabular parse with a
-    whole-token substring fallback.
+    Primary path: the tool prints a pipe-delimited table, e.g.:
+        ID | Component | Component Full Name | Version | Size* | Release Date | OCI Image Count | Is Partial
+        <uuid> | SUPERVISOR_SERVICE_HARBOR | Harbor Service | 2.15.2+vmware.1-vks.1 | 119.2 KiB | ...
+    Columns are split on "|" and stripped; the header row is identified by an
+    exact (case-insensitive) "Component" column (or "Artifact"/"Name" as
+    fallback header spellings), and the per-row "Version" column is captured
+    for each known component. Row iteration stops at the first line with no
+    "|" after the header (the closing dashed border / summary line).
+
+    Fallback: if no such table is found (format drift, unexpected output),
+    fall back to a whole-token substring match with no version info -- a
+    component matched only here accepts any version, since a false
+    "unmanaged" is the dangerous failure mode (it feeds the delete workflow)
+    when we have no reliable version data to check.
+
+    Returns a dict mapping each managed component to either a list of raw
+    version strings tracked for it, or None if only matched via fallback
+    (any version accepted). A component absent from the dict is unmanaged.
     """
     known = set(known_components)
-    managed: set[str] = set()
+    managed: dict[str, Optional[list[str]]] = {}
 
     lines = [ln for ln in list_output.splitlines() if ln.strip()]
 
-    # Strict path: assume a tabwriter-style table with a COMPONENT/ARTIFACT/NAME
-    # header column (the shape documented for the sibling `depot binaries list`
-    # command), columns separated by 2+ spaces.
-    header_idx = next(
-        (i for i, ln in enumerate(lines) if re.search(r"\b(COMPONENT|ARTIFACT|NAME)\b", ln, re.IGNORECASE)),
-        None,
-    )
-    if header_idx is not None:
-        header_cols = re.split(r"\s{2,}", lines[header_idx].strip())
-        col_idx = next(
-            (i for i, c in enumerate(header_cols) if c.strip().upper() in ("COMPONENT", "ARTIFACT", "NAME")),
-            None,
-        )
-        if col_idx is not None:
-            for ln in lines[header_idx + 1 :]:
-                if re.fullmatch(r"[-=\s]+", ln):  # separator row
-                    continue
-                cols = re.split(r"\s{2,}", ln.strip())
-                if col_idx < len(cols):
-                    candidate = cols[col_idx].strip().upper()
-                    if candidate in known:
-                        managed.add(candidate)
+    header_idx: Optional[int] = None
+    comp_idx: Optional[int] = None
+    ver_idx: Optional[int] = None
+    for i, ln in enumerate(lines):
+        if "|" not in ln:
+            continue
+        upper_cols = [c.strip().upper() for c in ln.split("|")]
+        candidate_idx = next((j for j, c in enumerate(upper_cols) if c in ("COMPONENT", "ARTIFACT", "NAME")), None)
+        if candidate_idx is not None:
+            header_idx = i
+            comp_idx = candidate_idx
+            ver_idx = next((j for j, c in enumerate(upper_cols) if c == "VERSION"), None)
+            break
 
-    # Fallback: the real tabular shape of `depot artifacts list` is not
-    # publicly documented, so also scan every line for each known component
-    # identifier as a whole-token, case-insensitive substring match,
-    # regardless of column position.
+    if header_idx is not None and comp_idx is not None:
+        for ln in lines[header_idx + 1 :]:
+            # Dashed border rows (both above and below the header, and after
+            # the last data row) and any other non-tabular trailer lines
+            # (e.g. "N elements", the "* Note:" footnote) have no "|" --
+            # skip them rather than treating the first one as end-of-table.
+            if "|" not in ln:
+                continue
+            if re.fullmatch(r"[-=\s]+", ln):  # separator row that happens to contain "|"
+                continue
+            cols = [c.strip() for c in ln.split("|")]
+            if comp_idx >= len(cols):
+                continue
+            candidate = cols[comp_idx].upper()
+            if candidate not in known:
+                continue
+            version_value = cols[ver_idx] if ver_idx is not None and ver_idx < len(cols) else ""
+            if version_value:
+                versions = managed.get(candidate)
+                if not isinstance(versions, list):
+                    versions = []
+                versions.append(version_value)
+                managed[candidate] = versions
+            elif candidate not in managed:
+                managed[candidate] = None
+
+    # Fallback: scan every line for each known component identifier as a
+    # whole-token, case-insensitive substring match, regardless of column
+    # position. No version info is available this way, so a component
+    # matched only here accepts any version.
     for ln in lines:
         upper = ln.upper()
         for comp in known:
             if comp in managed:
                 continue
             if re.search(rf"\b{re.escape(comp)}\b", upper):
-                managed.add(comp)
+                managed[comp] = None
 
     return managed
+
+
+def extract_path_version(repo: str) -> Optional[str]:
+    """The version segment of a Software Depot repo path is always the 3rd
+    path component, e.g. "supervisor-service-harbor/ga/2.15.2/harbor" -> "2.15.2"."""
+    parts = repo.split("/")
+    if len(parts) < 3:
+        return None
+    return parts[2]
 
 
 @dataclass
@@ -316,37 +372,115 @@ class Report:
     unmapped: list[RepoImage]
 
 
-def classify(images: list[RepoImage], managed_components: set[str]) -> Report:
+def classify(images: list[RepoImage], managed_versions: dict[str, Optional[list[str]]]) -> Report:
     managed: list[RepoImage] = []
     unmanaged: list[RepoImage] = []
     unmapped: list[RepoImage] = []
     for image in images:
         if image.component is None:
             unmapped.append(image)
-        elif image.component in managed_components:
+            continue
+        if image.component not in managed_versions:
+            unmanaged.append(image)
+            continue
+        versions = managed_versions[image.component]
+        if versions is None:
+            # Component matched, but no VERSION column was found for it --
+            # accept any version (see parse_managed_versions docstring).
+            managed.append(image)
+            continue
+        path_version = extract_path_version(image.repo)
+        # vcf-download-tool's reported version string is not an exact match
+        # of the repo path's version segment (e.g. it may include a build
+        # suffix) -- a match is the path version appearing as a substring of
+        # a tracked version string, not equality.
+        if path_version is not None and any(path_version in v for v in versions):
             managed.append(image)
         else:
             unmanaged.append(image)
     return Report(managed=managed, unmanaged=unmanaged, unmapped=unmapped)
 
 
-def print_remediation(image: RepoImage, args: argparse.Namespace) -> None:
-    print(f"\n# Unmanaged image: {args.depot_fqdn}/{image.repo}:{image.tag}")
-    print(f"# (matched component: {image.component}; depot tag found: {image.tag})")
+# Digest-derived tags (e.g. cosign "sha256-<hex>.sig"/".att"/".sbom", or a
+# bare hex digest used as a tag) aren't meaningful to a human reading a
+# report -- prefer a human-named version tag as the representative tag for a
+# repo path whenever one is present.
+# Matched as a prefix, not a full-string match: cosign/imgpkg attach digest-derived
+# tags with varied, multi-segment suffixes (e.g. "sha256-<hex>.sig", ".att", ".sbom",
+# ".image-locations.imgpkg"), so anything after the digest is ignored rather than
+# required to fit one fixed suffix grammar.
+_HASH_LIKE_TAG_PREFIX_RE = re.compile(r"^(?:sha256|sha512)[-:][0-9a-f]{32,}", re.IGNORECASE)
+_BARE_HEX_TAG_RE = re.compile(r"^[0-9a-f]{32,}$", re.IGNORECASE)
+
+
+def is_named_tag(tag: str) -> bool:
+    if _HASH_LIKE_TAG_PREFIX_RE.match(tag):
+        return False
+    if _BARE_HEX_TAG_RE.match(tag):
+        return False
+    return True
+
+
+@dataclass
+class GroupedImage:
+    image: RepoImage  # representative image for the repo path
+    total_in_repo: int  # total number of (repo, tag) images collapsed into this one
+
+
+def collapse_by_repo(images: list[RepoImage]) -> list[GroupedImage]:
+    """Group images that share a repo path (differing only by tag) into one
+    representative entry, preferring a named tag over a digest-derived one.
+    Order of first appearance is preserved."""
+    groups: dict[str, list[RepoImage]] = {}
+    order: list[str] = []
+    for img in images:
+        if img.repo not in groups:
+            groups[img.repo] = []
+            order.append(img.repo)
+        groups[img.repo].append(img)
+
+    result: list[GroupedImage] = []
+    for repo in order:
+        group = groups[repo]
+        named = [i for i in group if is_named_tag(i.tag)]
+        chosen = named[0] if named else group[0]
+        result.append(GroupedImage(image=chosen, total_in_repo=len(group)))
+    return result
+
+
+def print_grouped_images(images: list[RepoImage], marker: str) -> None:
+    for grouped in collapse_by_repo(images):
+        img = grouped.image
+        extra = grouped.total_in_repo - 1
+        suffix = f"  (+{extra} other tag(s) in this image repo)" if extra else ""
+        component_part = f"  (component: {img.component})" if img.component else ""
+        print(f"  {marker} {img.repo}:{img.tag}{component_part}{suffix}")
+
+
+def print_remediation(grouped: GroupedImage, args: argparse.Namespace) -> None:
+    image = grouped.image
+    print(f"\n# Unmanaged images under: {args.depot_fqdn}/{image.repo} ({grouped.total_in_repo} image(s))")
+    print(f"# (matched component: {image.component}; sample tag: {image.tag})")
+    print(f"# To target only this repo with 'delete': --repos {image.repo}  (bare repo path, no depot FQDN)")
     print(
-        "# NOTE: vcf-download-tool's depot-artifacts commands take --vcf-version as the\n"
-        "# VCF release identifier, not a per-image version; the tag above is shown so\n"
-        f"# you can visually confirm it matches what --vcf-version={args.vcf_version} will fetch."
+        "# NOTE: vcf-download-tool's --vcf-version is the VCF release identifier, not a\n"
+        "# per-image version; the tag above is shown so you can visually confirm it matches\n"
+        f"# what --vcf-version={args.remediation_vcf_version} will fetch (override with "
+        "--remediation-vcf-version\n"
+        "# if these images were built for a different release). <depot-store-dir> and\n"
+        "# <activation-code-file> are placeholders: a local directory to stage the\n"
+        "# downloaded artifact, and your Broadcom Business Services depot download\n"
+        "# activation code file."
     )
     print(
-        f"{args.vcf_download_tool} depot artifacts download --component={image.component} "
-        f"--vcf-version={args.vcf_version} \\\n"
-        f"    --ops-fqdn={args.ops_fqdn} --ops-user={args.ops_user} "
-        f"--ops-user-password-file={args.ops_user_password_file}"
+        f"{args.vcf_download_tool} artifacts download --component={image.component} "
+        f"--vcf-version={args.remediation_vcf_version} \\\n"
+        f"    --depot-store=<depot-store-dir> --depot-download-activation-code-file=<activation-code-file>"
     )
     print(
         f"{args.vcf_download_tool} depot artifacts upload --component={image.component} "
-        f"--vcf-version={args.vcf_version} \\\n"
+        f"--vcf-version={args.remediation_vcf_version} \\\n"
+        f"    --depot-store=<depot-store-dir> \\\n"
         f"    --depot-fqdn={args.depot_fqdn} \\\n"
         f"    --ops-fqdn={args.ops_fqdn} --ops-user={args.ops_user} "
         f"--ops-user-password-file={args.ops_user_password_file}"
@@ -371,17 +505,18 @@ def print_check_report(report: Report, args: argparse.Namespace) -> int:
 
     if report.managed:
         print(f"Managed ({len(report.managed)}):")
-        for image in report.managed:
-            print(f"  [OK] {image.repo}:{image.tag}  (component: {image.component})")
+        print_grouped_images(report.managed, "[OK]")
         print()
 
     if report.unmanaged:
-        print(f"Unmanaged ({len(report.unmanaged)}) -- known component, not seen by vcf-download-tool:")
-        for image in report.unmanaged:
-            print(f"  [!!] {image.repo}:{image.tag}  (component: {image.component})")
+        print(
+            f"Unmanaged ({len(report.unmanaged)}) -- known component, not seen by vcf-download-tool "
+            f"for --vcf-version={args.vcf_version} (may be available under a different VCF version):"
+        )
+        print_grouped_images(report.unmanaged, "[!!]")
         print("\nRemediation commands (run on a host with vcf-download-tool and network access to VCF Operations):")
-        for image in report.unmanaged:
-            print_remediation(image, args)
+        for grouped in collapse_by_repo(report.unmanaged):
+            print_remediation(grouped, args)
         print()
 
     if report.unmapped:
@@ -389,8 +524,7 @@ def print_check_report(report: Report, args: argparse.Namespace) -> int:
             f"Unmapped ({len(report.unmapped)}) -- no known component mapping; "
             "update COMPONENT_REPO_PREFIXES if these are expected:"
         )
-        for image in report.unmapped:
-            print(f"  [??] {image.repo}:{image.tag}")
+        print_grouped_images(report.unmapped, "[??]")
         print()
 
     if not report.unmanaged and not report.unmapped:
@@ -412,8 +546,8 @@ def cmd_check(args: argparse.Namespace) -> int:
         args.ops_user,
         args.ops_user_password_file,
     )
-    managed_components = parse_managed_components(list_output, COMPONENT_REPO_PREFIXES.keys())
-    report = classify(images, managed_components)
+    managed_versions = parse_managed_versions(list_output, COMPONENT_REPO_PREFIXES.keys())
+    report = classify(images, managed_versions)
     return print_check_report(report, args)
 
 
@@ -423,8 +557,10 @@ def confirm_delete(targets: list[RepoImage], word: Optional[str]) -> None:
     print(
         "This will permanently delete the following image manifest(s) from the\n"
         "Software Depot OCI registry. Deleting a manifest only unlinks it from the\n"
-        "tag list; underlying blobs are reclaimed only by a separate registry\n"
-        "garbage-collection pass, which this script does NOT perform.\n"
+        "tag list; underlying blobs, and the repo path itself in the registry's\n"
+        "_catalog listing, are reclaimed only by a separate registry garbage-\n"
+        "collection pass, which this script does NOT perform -- a repo may still\n"
+        "appear in _catalog with zero tags after this completes; that is expected.\n"
         "Any Supervisor / VKS deployment that still references these images by tag\n"
         "will fail to pull them after this runs.\n",
         file=sys.stderr,
@@ -489,17 +625,34 @@ def depot_write_enabled(toggle_script: Path, vsp_host: str, admin_username: str,
         toggle_depot("disable", toggle_script, vsp_host, admin_username, admin_password)
 
 
+class TagAlreadyGoneError(Exception):
+    """The tag no longer resolves to a manifest (HTTP 404 on both HEAD and GET).
+
+    This commonly happens when another tag in the same delete batch shares the
+    same underlying manifest digest (e.g. a cosign .sig/.imgpkg/.image-locations
+    companion tag, or even the "real" version tag itself): deleting that shared
+    digest via one tag name makes every other tag pointing at it stop resolving,
+    even though it was never deleted by that name specifically. The desired end
+    state (the tag is gone) is already achieved, so this is treated as a
+    success, not a failure.
+    """
+
+
 def get_manifest_digest(depot_fqdn: str, repo: str, tag: str) -> str:
     url = f"https://{depot_fqdn}/v2/{repo}/manifests/{tag}"
     headers = {"Accept": _MANIFEST_ACCEPT}
     status, resp_headers, _ = http_request(url, method="HEAD", headers=headers)
     digest = resp_headers.get("Docker-Content-Digest") if status == 200 else None
+    last_status = status
     if not digest:
         # Some registries only set the digest header on GET, not HEAD.
         status, resp_headers, _ = http_request(url, method="GET", headers=headers)
         digest = resp_headers.get("Docker-Content-Digest") if status == 200 else None
+        last_status = status
     if not digest:
-        raise RuntimeError(f"could not determine manifest digest for {repo}:{tag} (HTTP {status})")
+        if last_status == 404:
+            raise TagAlreadyGoneError(f"{repo}:{tag} no longer resolves (HTTP 404)")
+        raise RuntimeError(f"could not determine manifest digest for {repo}:{tag} (HTTP {last_status})")
     return digest
 
 
@@ -522,12 +675,12 @@ def cmd_delete(args: argparse.Namespace) -> int:
         args.ops_user,
         args.ops_user_password_file,
     )
-    managed_components = parse_managed_components(list_output, COMPONENT_REPO_PREFIXES.keys())
-    report = classify(images, managed_components)
+    managed_versions = parse_managed_versions(list_output, COMPONENT_REPO_PREFIXES.keys())
+    report = classify(images, managed_versions)
 
     targets = report.unmanaged
-    if args.repo:
-        wanted_repos = set(args.repo)
+    if args.repos:
+        wanted_repos = set(args.repos)
         targets = [i for i in targets if i.repo in wanted_repos]
     if args.tag:
         targets = [i for i in targets if i.tag == args.tag]
@@ -537,8 +690,13 @@ def cmd_delete(args: argparse.Namespace) -> int:
         return 0
 
     print(f"{len(targets)} unmanaged image(s) selected for deletion:")
-    for image in targets:
-        print(f"  - {image.repo}:{image.tag}  (component: {image.component})")
+    for grouped in collapse_by_repo(targets):
+        extra = grouped.total_in_repo - 1
+        tag_part = f"tag: {grouped.image.tag}"
+        if extra:
+            tag_part += f" and +{extra} other tag(s) in this image repo"
+        # Repo path shown bare (no ":tag") so it can be copy-pasted directly into --repos.
+        print(f"  - {grouped.image.repo}  (component: {grouped.image.component})  ({tag_part})")
 
     if args.dry_run:
         print("\n--dry-run: no confirmation prompt, no toggle call, and no DELETE requests were made.")
@@ -547,17 +705,26 @@ def cmd_delete(args: argparse.Namespace) -> int:
     confirm_delete(targets, args.yes_i_am_sure)
 
     failures: list[RepoImage] = []
+    already_gone: list[RepoImage] = []
     with depot_write_enabled(args.toggle_script, args.vsp_host, args.admin_username, args.admin_password):
         for image in targets:
             try:
                 digest = get_manifest_digest(args.depot_fqdn, image.repo, image.tag)
                 delete_manifest(args.depot_fqdn, image.repo, digest)
                 print(f"Deleted {image.repo}:{image.tag} (digest {digest}).")
+            except TagAlreadyGoneError:
+                # Already removed, most likely as a side effect of deleting another
+                # tag in this batch that shared the same underlying manifest digest.
+                # The desired end state is met, so this counts as success.
+                print(f"Already gone (no longer resolves, nothing to delete): {image.repo}:{image.tag}.")
+                already_gone.append(image)
             except Exception as exc:  # collect and continue -- one bad delete must not skip disable
                 print(f"Error: failed to delete {image.repo}:{image.tag}: {exc}", file=sys.stderr)
                 failures.append(image)
 
-    print(f"\nSummary: {len(targets) - len(failures)} succeeded, {len(failures)} failed.")
+    succeeded = len(targets) - len(failures)
+    already_gone_note = f" ({len(already_gone)} of which were already gone)" if already_gone else ""
+    print(f"\nSummary: {succeeded} succeeded{already_gone_note}, {len(failures)} failed.")
     return 0 if not failures else 1
 
 
@@ -572,20 +739,36 @@ Actions:
           managed, 1 if action is needed.
 
   delete  Delete unmanaged image manifest(s) from the Software Depot OCI
-          registry. Re-runs `check` internally (never trusts a stale list),
+          registry. Requires exactly one of --all (every unmanaged image) or
+          --repos (a comma-separated list of specific repo paths) to select
+          scope. Re-runs `check` internally (never trusts a stale list),
           requires typing DELETE to confirm (or --yes-i-am-sure DELETE), and
           wraps the deletion in an automatic enable/disable of OCI writes via
           toggle_software_depot_oci_image_upload.sh (disable always runs,
           even on failure or Ctrl-C).
 
 Examples:
+  # --vcf-version defaults to 9.1 (all 9.1.x patch releases); omit it unless
+  # you need to narrow the check to one specific patch version.
   %(prog)s check \\
-      --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \\
+      --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net \\
       --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \\
       --ops-user-password-file /root/.ops-pw
 
-  %(prog)s delete \\
-      --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net --vcf-version 9.1.0 \\
+  # --vcf-version defaults to 9.1.0 for 'delete' instead (see --vcf-version
+  # above for why); omit it unless these images were uploaded for a different
+  # VCF release. Remove --dry-run to delete the specified images from the
+  # Software Depot.
+  %(prog)s delete --all \\
+      --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net \\
+      --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \\
+      --ops-user-password-file /root/.ops-pw \\
+      --vsp-host vsp.env1.lab.test --admin-username admin@vsp.local \\
+      --admin-password '...' --dry-run
+
+  # Remove --dry-run to delete the specified images from the Software Depot.
+  %(prog)s delete --repos vcf-service-argocd/ga/1.1.0/argocd-service,supervisor-service-harbor/ga/2.14.2/harbor \\
+      --depot-fqdn fleet-10-144-79-70.vcfd.broadcom.net \\
       --ops-fqdn ops.env1.lab.test --ops-user admin@vsp.local \\
       --ops-user-password-file /root/.ops-pw \\
       --vsp-host vsp.env1.lab.test --admin-username admin@vsp.local \\
@@ -610,8 +793,25 @@ Examples:
 
     parser.add_argument("--depot-fqdn", required=True, metavar="FQDN", help="Software Depot FQDN.")
     parser.add_argument(
-        "--vcf-version", required=True, metavar="VER",
-        help="VCF release identifier, e.g. 9.1.0. Passed through to vcf-download-tool.",
+        "--vcf-version", default=None, metavar="VER",
+        help="VCF release identifier, passed to 'vcf-download-tool depot artifacts list'. "
+        "Defaults to '9.1' for 'check' -- the minor-version form (rather than a specific "
+        "patch like 9.1.0 or 9.1.1) so the list reports every image released under 9.1.x, "
+        "avoiding false 'unmanaged' results for images released under a different 9.1.x "
+        "patch than the one checked. Defaults to the specific patch '9.1.0' for 'delete' "
+        "instead, since the untracked images this script targets for deletion were manually "
+        "uploaded only under VCF 9.1.0; a narrower, exact match there avoids treating an "
+        "image that's genuinely unmanaged under 9.1.0 as managed just because some other "
+        "9.1.x patch happens to include a similarly-versioned artifact. Override either "
+        "default with an explicit value if needed.",
+    )
+    parser.add_argument(
+        "--remediation-vcf-version", default="9.1.0", metavar="VER",
+        help="VCF release identifier used in the 'artifacts download'/'depot artifacts upload' "
+        "remediation commands 'check' prints for each unmanaged image. Unlike --vcf-version, "
+        "this must be a specific patch (default: 9.1.0, the release these manually-uploaded "
+        "images were built for) rather than a minor-version wildcard, since vcf-download-tool "
+        "needs an exact release to actually download/upload an artifact.",
     )
     parser.add_argument("--ops-fqdn", required=True, metavar="FQDN", help="VCF Operations FQDN. Passed through to vcf-download-tool.")
     parser.add_argument("--ops-user", required=True, metavar="USER", help="VCF Operations username. Passed through to vcf-download-tool.")
@@ -644,11 +844,20 @@ Examples:
         help="Path to toggle_software_depot_oci_image_upload.sh. Default: the copy next to this script.",
     )
     parser.add_argument(
-        "--repo", action="append", metavar="REPO",
-        help="'delete' only: restrict deletion to this repo path as printed by 'check' (repeatable). "
-        "Default: all unmanaged images.",
+        "--all", action="store_true",
+        help="'delete' only: target all unmanaged images. Mutually exclusive with --repos; "
+        "exactly one of the two is required.",
     )
-    parser.add_argument("--tag", metavar="TAG", help="'delete' only: restrict to this tag (combine with --repo to target one image).")
+    parser.add_argument(
+        "--repos", metavar="REPO[,REPO...]",
+        help="'delete' only: comma-separated list of repo paths (as printed by 'check') to restrict "
+        "deletion to, for when you don't want to delete every unmanaged image. Mutually exclusive "
+        "with --all; exactly one of the two is required.",
+    )
+    parser.add_argument(
+        "--tag", metavar="TAG",
+        help="'delete' only: further restrict to this tag. Requires --repos with exactly one repo.",
+    )
     parser.add_argument(
         "--dry-run", action="store_true",
         help="'delete' only: print the deletion plan and exit; no prompt, no toggle, no DELETE calls.",
@@ -660,6 +869,9 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    if args.vcf_version is None:
+        args.vcf_version = "9.1.0" if args.action == "delete" else "9.1"
 
     if args.yes_i_am_sure is not None and args.yes_i_am_sure != "DELETE":
         parser.error("--yes-i-am-sure must be exactly 'DELETE' if given.")
@@ -679,6 +891,25 @@ Examples:
         ]
         if missing:
             parser.error(f"action 'delete' requires {', '.join(missing)}.")
+
+        if args.all and args.repos:
+            parser.error("--all and --repos are mutually exclusive.")
+        if not args.all and not args.repos:
+            parser.error("action 'delete' requires exactly one of --all or --repos.")
+
+        repos_list = [r.strip() for r in args.repos.split(",")] if args.repos else []
+        repos_list = [r for r in repos_list if r]
+        if args.repos and not repos_list:
+            parser.error("--repos must contain at least one non-empty repo path.")
+        # Tolerate copy-pasting the fully-qualified "<depot-fqdn>/<repo>" form
+        # shown in `check`'s remediation output, not just the bare repo path
+        # that internally matches RepoImage.repo.
+        fqdn_prefix = f"{args.depot_fqdn}/"
+        repos_list = [r[len(fqdn_prefix) :] if r.startswith(fqdn_prefix) else r for r in repos_list]
+        args.repos = repos_list or None
+
+        if args.tag and (args.all or len(args.repos or []) != 1):
+            parser.error("--tag requires --repos with exactly one repo.")
 
     if args.action == "check":
         sys.exit(cmd_check(args))
