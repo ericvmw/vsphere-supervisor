@@ -124,7 +124,7 @@ Locate the `imgpkgBundle.image` field in the YAML. The original value points dir
 ```yaml
       fetch:
         - imgpkgBundle:
-            image: "depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor/ga/2.15.2/harbor:v2.15.2_vmware.2-vks.1"
+            image: "depot.kube-system.svc/vcf/supervisor-service-harbor/ga/2.15.2/harbor:v2.15.2_vmware.2-vks.1"
 ```
 
 Replace it with the management-proxy hostname:
@@ -138,7 +138,7 @@ Replace it with the management-proxy hostname:
 You can use `sed` to apply this substitution in place:
 
 ```bash
-sed -i 's|depot.kube-system.svc/vcf/vcf-supervisor-services/supervisor-service-harbor|depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor|g' \
+sed -i 's|depot.kube-system.svc/vcf/supervisor-service-harbor|depot-image-proxy.kube-system.svc.cluster.local/supervisor-service-harbor|g' \
     harbor-svs-v2.15.2-vmware.1-vks.1-25601986.yml
 ```
 
