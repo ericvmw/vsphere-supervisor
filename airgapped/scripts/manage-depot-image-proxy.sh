@@ -139,8 +139,8 @@ fetch_vc_ca() {
     curl -ksSf "https://${VC_API_HOST}/certs/download.zip" -o "${zipf}" \
         || die "Failed to download vCenter certs zip"
     mkdir -p "${certdir}"
-    unzip -q "${zipf}" -d "${certdir}" \
-        || die "Failed to unzip vCenter certs"
+    bsdtar -xf "${zipf}" -C "${certdir}" \
+        || die "Failed to bsdtar vCenter certs"
     # Concatenate all trusted root PEMs (*.0 files) into a single bundle.
     : > "${pemf}"
     local f
