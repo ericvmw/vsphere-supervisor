@@ -276,10 +276,17 @@ When a repo has multiple tags (e.g. an image plus its cosign `.sig`/`.imgpkg`/`.
 
 After the deletion completes, run `./manage_depot_manual_oci_images.py check` again to see which unmanaged images (if any) still remain, and iterate — remediating each one via Option 1 or deleting it via this option — until `check` reports everything as managed or intentionally unmapped.
 
+### After remediation: enable automatic orphan cleanup
+
+Whichever option you used above, after all manually uploaded OCI images are migrated or cleaned properly, the Software Depot's OCI registry can still accumulate genuinely orphaned OCI images over time — for reasons unrelated to the manual-upload scenario this article covers (for example, blobs or manifests left behind by interrupted or superseded uploads). Detecting and removing those is outside the scope of this article and of `manage_depot_manual_oci_images.py`.
+
+Once you've finished remediating or deleting the manually-uploaded images above, enable the VCF software depot's built-in automatic orphan cleanup by following [KB Draft: Managing Automatic Cleanup of Orphaned OCI Images in VCF Software Depot](https://vmw-confluence.broadcom.net/spaces/WCP/pages/2726288653/KB-Draft+Managing+Automatic+Cleanup+of+Orphaned+OCI+Images+in+Fleet+Download+Service+FDS) _(draft KB; this link is temporary and will be updated once the article is published)_, so that real orphaned OCI images on the Software Depot are cleaned up properly going forward.
+
 ## Additional Information
 * [VKS Deployment Guide for VCF 9.1.0 air-gapped environments](/airgapped/air-gapped-vcf91.md) — the guide whose manual upload path causes this issue.
 * [VKS Deployment Guide for VCF 9.1.1+ air-gapped environments](/airgapped/air-gapped-vcf911.md) _(to be replaced by techdoc link)_ — the newer guide, unaffected by this issue since `vcf-download-tool` handles OCI images natively from 9.1.1 onward.
 * [`oci_image_depot_migrator.py`](scripts/oci_image_depot_migrator.py), [`toggle_software_depot_oci_image_upload.sh`](scripts/toggle_software_depot_oci_image_upload.sh), and [`manage_depot_manual_oci_images.py`](scripts/manage_depot_manual_oci_images.py) — the scripts referenced throughout this article; keep all three together under `airgapped/scripts/`.
+* [KB Draft: Managing Automatic Cleanup of Orphaned OCI Images in VCF Software Depot](https://vmw-confluence.broadcom.net/spaces/WCP/pages/2726288653/KB-Draft+Managing+Automatic+Cleanup+of+Orphaned+OCI+Images+in+Fleet+Download+Service+FDS) _(draft KB; link is temporary and will be updated once the article is published)_ — enable this after remediating or deleting the images covered by this article, so real orphaned OCI images are cleaned up automatically.
 
 <details>
 <summary><code>manage_depot_manual_oci_images.py --help</code> reference</summary>
