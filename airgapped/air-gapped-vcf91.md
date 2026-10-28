@@ -523,6 +523,9 @@ If your VCF deployment does not include VCF Automation, or you are running a VVF
 ### 7a. Configure a management proxy on the Supervisor to pull Harbor images from Software Depot
 
 Software Depot lives on the management network, so a management proxy is required to pull Harbor Supervisor Service images from it. The [`manage-depot-image-proxy.sh`](scripts/manage-depot-image-proxy.sh) script can add and remove this management proxy on a Supervisor in a vCenter. It requires that the Software Depot endpoint is already configured on the vCenter and that you have the vCenter and Supervisor identifiers along with the necessary credentials. If the Supervisor is configured with a proxy for image pulling, this domain `depot-image-proxy.kube-system.svc.cluster.local` should be added to the list of hosts excluded from the configured supervisor proxy via Supervisor proxy configuration UI or API.
+
+Always use the latest version of the script from this repository, especially if you ran an earlier version or encounter image pull issues through the management proxy. Re-running `add` with the latest script updates the existing proxy configuration on each Control Plane VM and re-registers `depot-registry` in place.
+
 ```bash
 ./manage-depot-image-proxy.sh -h
 
